@@ -50,7 +50,7 @@ CREATE TABLE users (
   CHECK (length(trim(display_name)) > 0),
   CHECK (length(webauthn_user_handle) = 32),
   CHECK ((is_active = 0) = (disabled_at IS NOT NULL))
-);
+) STRICT;
 
 -- ---------------------------------------------------------------------------
 -- sessions
@@ -67,7 +67,7 @@ CREATE TABLE sessions (
   absolute_expires_at INTEGER NOT NULL,           -- never extended
   user_agent          TEXT,                       -- truncated to 256 chars, for the account screen
   CHECK (absolute_expires_at > created_at)
-);
+) STRICT;
 CREATE INDEX sessions_user      ON sessions (user_id);
 CREATE INDEX sessions_reaping   ON sessions (idle_expires_at);
 
@@ -85,7 +85,7 @@ CREATE TABLE credentials (
   created_at    INTEGER NOT NULL,
   last_used_at  INTEGER,
   CHECK (length(trim(device_label)) > 0)
-);
+) STRICT;
 CREATE INDEX credentials_user ON credentials (user_id);
 
 -- ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ CREATE TABLE webauthn_challenges (
   expires_at INTEGER NOT NULL,
   CHECK (expires_at > created_at),
   CHECK ((purpose = 'registration') <= (user_id IS NOT NULL))  -- registration requires a user
-);
+) STRICT;
 CREATE INDEX webauthn_challenges_reaping ON webauthn_challenges (expires_at);
 
 -- ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ CREATE TABLE stores (
   created_by  TEXT    REFERENCES users(id) ON DELETE SET NULL,
   archived_at INTEGER,
   CHECK (length(trim(name)) > 0)
-);
+) STRICT;
 CREATE INDEX stores_listing ON stores (archived_at, sort_order, name);
 
 -- ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ CREATE TABLE trips (
   closed_by TEXT    REFERENCES users(id) ON DELETE SET NULL,
   CHECK (seq >= 1),
   CHECK ((status = 'closed') = (closed_at IS NOT NULL))
-);
+) STRICT;
 CREATE UNIQUE INDEX trips_one_open_per_store ON trips (store_id) WHERE status = 'open';
 CREATE UNIQUE INDEX trips_store_seq          ON trips (store_id, seq);
 CREATE INDEX        trips_history            ON trips (store_id, seq DESC);
@@ -206,7 +206,7 @@ CREATE TABLE items (
   CHECK ((state = 'ticked') = (ticked_at IS NOT NULL)),
   -- a carried item must point at its clone; a non-carried item must not
   CHECK ((state = 'carried') = (carried_to_item_id IS NOT NULL))
-);
+) STRICT;
 CREATE UNIQUE INDEX items_client_id   ON items (trip_id, client_id) WHERE client_id IS NOT NULL;
 CREATE INDEX items_list               ON items (trip_id, state, sort_order) WHERE deleted_at IS NULL;
 CREATE INDEX items_store_history      ON items (store_id, created_at);
@@ -215,12 +215,37 @@ CREATE INDEX items_origin             ON items (origin_item_id);
 -- ---------------------------------------------------------------------------
 -- Connection pragmas. Applied on every connection open, not stored in the file
 -- except journal_mode, which is persistent.
---   journal_mode=WAL   readers never block the writer
---   busy_timeout=5000  wait rather than fail on a concurrent writer
---   foreign_keys=ON    OFF by default in SQLite; every FK above is inert without it
---   synchronous=NORMAL correct and durable under WAL; FULL is not needed here
+--   journal_mode=WAL       readers never block the writer (persistent in the file)
+--   foreign_keys=ON        OFF by default in SQLite; every FK above is inert without it
+--   busy_timeout=5000      wait rather than fail on a concurrent writer
+--   synchronous=NORMAL     under WAL this cannot corrupt the file; on power loss it
+--                          can lose the last transactions. A home server has no UPS,
+--                          and losing the last few seconds of a shopping list is
+--                          acceptable. Override with ZEMBIL_SYNCHRONOUS=FULL.
+--   trusted_schema=OFF     hardening; no extensions are loaded
+--   journal_size_limit=67108864
+--   wal_autocheckpoint=1000
+--   temp_store=MEMORY
+--
+-- All tables are declared STRICT. Verified on this build: a STRICT table rejects
+-- a string written to an INTEGER column instead of silently storing it. Without
+-- it, SQLite's type affinity would accept the mistake and the bug would surface
+-- as bad data months later.
 -- ---------------------------------------------------------------------------
 ```
+
+### 1.1a `node:sqlite` binding rules (measured, not recalled)
+
+- **JavaScript booleans cannot be bound.** `stmt.run(true)` throws
+  *"Provided value cannot be bound to SQLite parameter"*. Every boolean must be converted to `1`/`0`
+  at the repository boundary. This is the single most likely source of a runtime error in the data
+  layer, and it fails at the first call rather than silently.
+- Rows come back as **null-prototype objects**. `Object.hasOwn(row, k)` works; `row.hasOwnProperty(k)`
+  throws. Do not spread a row into something that expects `Object.prototype`.
+- `BigInt` is off by default; timestamps as epoch-milliseconds fit comfortably in a JS number.
+- `node:sqlite` is **synchronous**, and there is exactly one process, so the event loop is the write
+  serializer. Use **one connection** for reads and writes. There is no pool and no interleaving, so
+  `SQLITE_BUSY` should never occur in practice — `busy_timeout` is defence in depth, not the design.
 
 ### 1.2 Table invariants
 

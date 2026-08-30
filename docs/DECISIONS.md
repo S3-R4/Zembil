@@ -257,21 +257,35 @@ verify base-image tags and the non-root volume-ownership approach empirically ra
 
 ---
 
-## D-013 — Backup: `VACUUM INTO`, because `node:sqlite` has no `.backup()`
+## D-013 — Backup: `backup()` for snapshots, `VACUUM INTO` for pre-migration
 
-**Context.** I checked the `DatabaseSync` prototype directly: `open, close, prepare, exec, function,
+**Superseded an earlier version of this record.** That version claimed `node:sqlite` has no online
+backup, based on inspecting the `DatabaseSync` prototype (`open, close, prepare, exec, function,
 aggregate, createSession, applyChangeset, enableLoadExtension, loadExtension, serialize, deserialize,
-setAuthorizer`. There is no `backup`.
+setAuthorizer` — no `backup`). That inspection was too narrow and the conclusion was wrong. A design
+agent challenged it; I re-measured.
 
-**Decision.** Online backup is `VACUUM INTO '<path>'`, which produces a consistent single-file
-snapshot while the app keeps serving. Restore is documented as a stop, replace, remove stale
-`-wal`/`-shm`, start sequence.
+**Measured on this machine.** `node:sqlite` exports `DatabaseSync, StatementSync, Session, constants,
+backup`. `backup` is a **module-level function**, not a method: `import { backup } from 'node:sqlite'`.
+It is async and incremental, taking `{ rate, progress }`. Run against a live WAL database of 5000
+rows it copied 21 pages and the resulting file passed `PRAGMA quick_check`.
+
+**Decision.**
+- **Scheduled and on-demand snapshots use `backup()`.** Being incremental, it yields between page
+  batches instead of holding a read lock for the whole copy, so a backup never stalls someone
+  ticking an item in a shop.
+- **`VACUUM INTO` is kept for the pre-migration snapshot and for periodic compaction**, where a
+  defragmented single-file output is what is wanted and a brief lock is acceptable.
+- Every migration takes an automatic `pre-migration-<from>-to-<to>.sqlite` snapshot first and
+  **refuses to proceed if the snapshot fails**.
 
 **Rationale.** WAL mode means the database is three files. Copying `zembil.db` alone while the app is
-running yields a **silently corrupt** backup, which is the worst failure mode available — it is only
-discovered when it is needed. `VACUUM INTO` is SQLite's blessed answer and needs no extra tooling.
+running yields a **silently corrupt** backup — the worst failure mode available, because it is only
+discovered when it is needed. Both mechanisms above produce a consistent single file.
 
----
+**Consequence.** Restore is stop, replace the single file, delete any stale `-wal`/`-shm`, start.
+Forward-only migrations need no down-scripts: the rollback is restoring the pre-migration snapshot,
+which is strictly more reliable than a down-script nobody has ever run.
 
 ## D-014 — First admin: bootstrap on an empty users table only
 
@@ -327,3 +341,22 @@ the desktop keyboard shortcuts.
 **Rationale.** Trip history is a read-only view of rows D-009 already produces, so it costs one query
 rather than a feature. "Add all again" and search are genuine additions and the brief says MVP means
 working, not feature-complete.
+
+---
+
+## D-018 — `STRICT` tables and a schema-drift test
+
+**Decision.** Every table is declared `STRICT`. CI builds a database from zero by running every
+migration in order and diffs `SELECT sql FROM sqlite_schema ORDER BY name` against a checked-in
+`schema.snapshot.sql`.
+
+**Rationale.** SQLite's default type affinity will happily store `'banana'` in an `INTEGER` column.
+`STRICT` turns that into an immediate error — verified on this build. The snapshot diff catches the
+failure mode an ORM is usually bought to prevent and does not actually fix: **schema drift**, where
+the migration sequence that produced the development database is not the sequence that will run
+against the production file. That is discovered at 23:00 when the container will not boot. The
+snapshot also doubles as readable documentation of the current schema.
+
+**Consequence.** Column types are restricted to `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB`, `ANY` —
+which the schema already satisfies. Editing a shipped migration in place becomes a CI failure rather
+than a production surprise.

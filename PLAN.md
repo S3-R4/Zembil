@@ -108,7 +108,7 @@ Repo scaffold, agent definitions, `PLAN.md`, `docs/DECISIONS.md`, `docs/CONTRACT
 I-10, I-11, I-12) verified to actually reject its violation, and every test-bound invariant listed as
 such in `CONTRACT.md` §1.2 rather than assumed. ✅
 
-### M1 — Data and domain — `zembil-data`
+### M1 — Data and domain — `zembil-data` *(complete)*
 SvelteKit skeleton that builds and boots. Database connection with pragmas, migration runner,
 migration 001. Domain modules for stores, trips, items, tick, untick and rollover. In-process event
 bus. The `/api/{stores,items,trips}` routes. Vitest suite.
@@ -132,7 +132,7 @@ bus. The `/api/{stores,items,trips}` routes. Vitest suite.
 - A test asserts the §3.0 table: each listed write bumps `rev` and emits exactly the listed events,
   and each idempotent no-op bumps and emits nothing.
 
-### M2 — Auth — `zembil-auth`
+### M2 — Auth — `zembil-auth` *(complete)*
 scrypt hashing, session lifecycle, `hooks.server.ts` (session resolution, origin check, security
 headers), rate limiting, login/logout, password change, admin user CRUD, passkey registration and
 login, first-admin bootstrap.
@@ -142,7 +142,7 @@ login, first-admin bootstrap.
   for a non-admin session, `LAST_ADMIN` guard, passkey register and login, bootstrap idempotency.
 - A test asserts login timing does not distinguish a known from an unknown username.
 
-### M3 — Frontend — `zembil-frontend`
+### M3 — Frontend — `zembil-frontend` *(complete)*
 Design tokens, layout shell with bottom navigation, login and passkey screens, store list, item list
 with optimistic tick and undo, quick-add sheet, item edit, finish-trip confirm, trip history, account
 screen, admin screen. PWA manifest, icons, service worker. SSE client with focus/online revalidation.
@@ -152,16 +152,42 @@ screen, admin screen. PWA manifest, icons, service worker. SSE client with focus
 - A test asserts the service worker never serves a cached authenticated document.
 - Measured tap count from cold open to item added is reported.
 
-### M4 — Deploy — `zembil-deploy`
+### M4 — Deploy — `zembil-deploy` *(complete)*
 Dockerfile, compose, entrypoint, healthcheck, graceful shutdown with WAL checkpoint, backup and
 restore scripts, README covering deploy, reverse proxy for Caddy/nginx/Traefik, upgrade, backup,
 restore, and admin password recovery.
 **Exit:** on a clean state, `docker compose up` yields a working app with a bootstrapped admin;
 a backup taken while serving is restored successfully and verified; image size reported.
 
-### M5 — Hardening
+### M5 — Hardening *(in progress)*
 Act on every accumulated reviewer finding. Full-suite green. Final end-to-end pass against the
 "done means" checklist.
+
+**Reviewer status — the honest version.** M1 was audited three times and its findings are closed.
+The M2 and M4 reviewer runs have not happened: both agents terminated on their first request at the
+account's monthly spend limit. Their absence is a real gap in this milestone, not a formality —
+D-030 and D-034 both exist because something written confidently turned out to be wrong, and the
+reviewer is the only pass in this process that is not written by whoever wrote the code. They are
+re-run before M5 is called done.
+
+**Done-means checklist**, from the brief. Verified 2026-08-31 unless stated.
+
+| Clause | State |
+|---|---|
+| Clean-machine `docker compose up` brings it up with a bootstrapped admin | ✅ verified on an empty volume: healthy, password logged once, login works |
+| Documented volume for data | ✅ `zembil_data`, README "Data and backups" |
+| Documented first-admin bootstrap | ✅ README, `.env.example`, CONTRACT.md §3.8 |
+| Password login | ✅ unit + e2e |
+| Admin-created accounts, disable, reset password | ✅ unit; admin screen exercised by hand against the container |
+| Passkey registration and login **over HTTPS** | ⚠️ verified over `http://localhost`, which is a secure context and exercises the identical code path. Not verified against a real TLS host with a real `ZEMBIL_RP_ID`, because this machine has no such host. That gap is configuration, not code, and the README says how to get it wrong. |
+| Tick, un-tick and carry-over covered by tests | ✅ unit (M1) + e2e |
+| Usable one-handed on a 390px phone | ✅ e2e asserts the 44px floor on every visible control and that the primary action sits below two-thirds of the viewport |
+| README covers deploy, reverse proxy, backup and restore | ✅ including the `proxy_buffering off` that SSE needs |
+
+Measured, since the brief asked for it: **4 taps from cold open to an item added**, and **2 taps for
+every item after that** — the quick-add sheet stays open. Both are pinned by
+`tests/e2e/taps.spec.js`, so a regression that adds a step fails the suite rather than being
+noticed a month later.
 
 ---
 

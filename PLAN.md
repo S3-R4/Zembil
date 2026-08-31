@@ -116,8 +116,11 @@ bus. The `/api/{stores,items,trips}` routes. Vitest suite.
 - `npm run build` succeeds and `node build/index.js` serves.
 - `npm test` green with at least one assertion per rule **R-1…R-17**.
 - A test proves the R-6 step 5 statement order is the only one that works: both two-statement
-  orders must raise `SQLITE_CONSTRAINT` (foreign key, and `items_client_id` respectively). Without
-  this the sequence silently "starts working" the day someone drops a constraint.
+  orders must raise a constraint error (foreign key, and `items_client_id` respectively). Without
+  this the sequence silently "starts working" the day someone drops a constraint. Note that
+  `node:sqlite` never reports the string `SQLITE_CONSTRAINT`: it sets `err.code = 'ERR_SQLITE_ERROR'`
+  and puts the **extended** result code in `err.errcode`, so the real assertion is
+  `(err.errcode & 0xff) === 19`.
 - A test proves `POST /items` with a `clientId` whose original was carried over returns `200` with
   the **clone on the successor trip**, not a second item (R-17).
 - A concurrency test proves two closes produce exactly one successor trip. §1.1a mandates a single

@@ -6,9 +6,10 @@ const config = {
 	preprocess: vitePreprocess(),
 	kit: {
 		adapter: adapter({ out: 'build' }),
-		// Ours in hooks.server.ts is the load-bearing check — see CONTRACT.md §3.
-		// This only ever inspects form content types, so it is defence in depth.
-		csrf: { checkOrigin: true },
+		// Defence in depth only. SvelteKit's own check inspects form content types
+		// alone, and Zembil's API is JSON — the load-bearing Origin check is ours,
+		// in hooks.server.ts, for every method and content type. See CONTRACT.md §3.
+		csrf: { trustedOrigins: [] },
 		csp: {
 			mode: 'hash',
 			directives: {

@@ -405,7 +405,13 @@ same reason as above: two items ticked in the same millisecond must not reshuffl
 list.
 
 **R-14 — Archiving a store.** Sets `archived_at`. The open trip is left open and untouched. An
-archived store is hidden from the store list and rejects writes with `409 STORE_ARCHIVED`.
+archived store is hidden from the default store list and rejects writes with `409 STORE_ARCHIVED`.
+"Writes" is exhaustively: `POST /stores/{id}/items`, `PATCH /items/{id}`, `DELETE /items/{id}`,
+`tick`, `untick` and `POST /stores/{id}/trips/close`. **Reads are not rejected** — `GET
+/stores/{id}/list` and the history endpoints work on an archived store, because the un-archive action
+is reached from that store's own screen and rejecting the read would make R-14's "un-archiving
+restores it intact" unreachable. `PATCH /stores/{id}` is likewise never rejected; it is the endpoint
+that un-archives.
 Un-archiving restores it intact. Stores are never hard-deleted; that would cascade away history.
 
 **R-15 — `sort_order` allocation.** `sort_order` is assigned by the server and never by the client.
@@ -496,9 +502,10 @@ Every non-2xx response carries an `error` object of exactly this shape:
 { "error": { "code": "ITEM_NOT_FOUND", "message": "Item not found." } }
 ```
 
-Two responses add a **named sibling field** next to `error`, and only these two: `409
-VERSION_CONFLICT` adds `item: Item`, and `409 TRIP_ALREADY_CLOSED` adds `openTripId: string`. Both
-exist so the client can recover without a second round trip, and both are typed in §7. No other
+**Three** responses add a **named sibling field** next to `error`, and only these three: `409
+VERSION_CONFLICT` adds `item: Item`, `409 TRIP_ALREADY_CLOSED` adds `openTripId: string`, and `409
+STORE_NAME_TAKEN` adds `storeId: string`. Each exists so the client can recover without a second
+round trip, and all three are typed in §7. No other
 error response adds anything, and no error response ever nests recovery data *inside* `error`.
 
 `message` is safe to show a user and never leaks internals. Diagnostic detail goes to the server log
@@ -705,6 +712,10 @@ take a version — a concurrent tick is not a conflict, it is agreement.
 **`POST /api/stores/{storeId}/trips/close`** — request `{ "tripId": string }`.
 `200` → `{ "closedTrip": Trip, "newTrip": Trip, "boughtCount": number, "carriedCount": number }`.
 `409 TRIP_ALREADY_CLOSED` → `{ "error": {...}, "openTripId": string }`. `409 TRIP_EMPTY` per R-6.2.
+A **missing or non-string** `tripId` is `400 VALIDATION_FAILED`, not a `409`. The `409` means "your
+view of the world is stale and here is the current trip"; a malformed body means the client is
+broken, and answering it with a recoverable-looking `409` hides that bug behind a retry loop that
+appears to work.
 
 ### 3.6 Trip history
 
@@ -714,8 +725,12 @@ take a version — a concurrent tick is not a conflict, it is agreement.
 | GET | `/api/trips/{tripId}` | session | One trip with its items |
 
 `GET /api/trips/{tripId}` → `{ "trip": TripSummary, "items": Item[] }`. Items are ordered
-`state ASC, sort_order ASC, id ASC` and **include `carried` items** — the history screen's "left on
-the list" count is meaningless without them, and R-13's exclusion of `carried` applies to the open
+**bought first, then left behind** —
+`CASE state WHEN 'ticked' THEN 0 WHEN 'carried' THEN 1 ELSE 2 END, sort_order ASC, id ASC` — and
+**include `carried` items**. Note the explicit `CASE`: a plain `state ASC` sorts alphabetically, which
+puts `carried` above `ticked` and renders the history screen with what you failed to buy at the top
+and what you actually bought below it. That is backwards. Carried items are included because the
+history screen's "left on the list" count is meaningless without them, and R-13's exclusion of `carried` applies to the open
 list only. Soft-deleted items are excluded per I-8. Works for open and closed trips alike.
 
 `GET /api/stores/{storeId}/trips?limit=20&before={seq}` →
@@ -853,11 +868,25 @@ export function revokeSession(sessionId: string): void;
 export function revokeUserStreams(userId: string): void;
 
 /** Registration, called by the GET /api/events route only. Returns an
- *  unsubscribe function the route calls on client disconnect. */
+ *  unsubscribe function the route calls on client disconnect.
+ *
+ *  `close` is how the bus tears a stream down from its own side — required by
+ *  the per-session stream cap in §4 (closing the oldest when a fifth opens) and
+ *  by revokeSession/revokeUserStreams. `send` alone cannot end a stream. It is
+ *  optional so that a three-argument call still compiles; the events route is
+ *  the only caller and it always passes four.
+ *
+ *  Implementation note: write it as `close: () => void = () => {}`, a DEFAULTED
+ *  parameter, not `close?: () => void`. Both are `close?: () => void` at every
+ *  call site and in the emitted .d.ts, but an optional parameter still counts
+ *  toward Function.length while a defaulted one does not — and a test pins
+ *  `subscribe.length === 3` as the guarantee that zembil-auth's three-argument
+ *  call keeps working. Do not "simplify" this back to `close?:`. */
 export function subscribe(
   userId: string,
   sessionId: string,
-  send: (event: ZembilEvent) => void
+  send: (event: ZembilEvent) => void,
+  close?: () => void
 ): () => void;
 ```
 
@@ -980,6 +1009,12 @@ not define them and the README must say so.
 There is **no application secret key**. Sessions are opaque random tokens stored hashed, so nothing
 needs signing — one less secret to provision, rotate, or leak.
 
+**Migrations run at module load of `src/hooks.server.ts`**, which `zembil-auth` owns and which
+SvelteKit imports once at process start, before the server listens. It calls `getDb()` eagerly and
+lets any failure throw. This is deliberate: a migration that fails must **crash the process**, not be
+discovered lazily by whichever request happens to arrive first and turned into a `500` while the
+container reports itself healthy. Nothing else may open the database before this point.
+
 **Bootstrap is idempotent**: it runs only when `SELECT COUNT(*) FROM users` is zero. A restart with
 the env vars still set never resets an existing admin's password.
 
@@ -1043,7 +1078,9 @@ export interface StoreSummary {
   pendingCount: number;
   tickedCount: number;
   lastClosedTripAt: number | null;
-  archivedAt: number | null;   // non-null only in the ?includeArchived=true listing
+  archivedAt: number | null;   // always accurate. The ?includeArchived=true listing is the only
+                               // place a non-null value appears in the store LIST; an embedded
+                               // summary (e.g. GET /stores/{id}/list) always reports the truth.
 }
 
 export type TripStatus = 'open' | 'closed';

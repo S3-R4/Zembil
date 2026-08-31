@@ -518,6 +518,18 @@ STORE_NAME_TAKEN` adds `storeId: string`. Each exists so the client can recover 
 round trip, and all three are typed in §7. No other
 error response adds anything, and no error response ever nests recovery data *inside* `error`.
 
+**The request body of any mutating endpoint must be a JSON object.** A body that parses as valid
+JSON but is `null`, an array, a string or a number is `400 VALIDATION_FAILED` with the message
+`Request body must be a JSON object.`; a body that does not parse at all is `400 VALIDATION_FAILED`
+with `Request body must be JSON.`. An **empty** body is the one exception — it is read as `{}`, so
+endpoints whose fields are all optional can be called with no body at all.
+
+These two messages are pinned, not incidental. Without the object check, `null` reaches a field
+access and becomes a `500`, and an array or string silently presents every field as `undefined` — at
+which point the field validators produce a `400` for their own reasons and the body-shape rule looks
+covered when nothing is enforcing it. Pinning the message is what makes a test able to tell the two
+apart.
+
 `message` is safe to show a user and never leaks internals. Diagnostic detail goes to the server log
 only. Shared codes: `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404),
 `ORIGIN_MISMATCH` (403), `VALIDATION_FAILED` (400), `RATE_LIMITED` (429), `CONFLICT` (409),

@@ -220,6 +220,21 @@ describe('other scalar inputs', () => {
 		}
 	});
 
+	// §3.1a/`boolean()`'s only caller: PATCH /stores' `archived` field. No other
+	// endpoint takes a boolean input.
+	test('PATCH /stores rejects a non-boolean archived value', () => {
+		const { h, store } = ctx();
+		try {
+			for (const archived of ['true', 'false', 1, 0, null, [], {}, 'yes']) {
+				expectValidationFailure(() => updateStore(h.db, store.id, { archived } as any));
+			}
+			// A real boolean still works, so the bound is not rejecting everything.
+			expect(updateStore(h.db, store.id, { archived: true }).archivedAt).not.toBeNull();
+		} finally {
+			h.close();
+		}
+	});
+
 	test('PATCH /stores with an empty body is 400, not a silent rev bump', () => {
 		const { h, store } = ctx();
 		try {

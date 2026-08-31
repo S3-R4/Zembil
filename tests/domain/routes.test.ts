@@ -157,6 +157,47 @@ describe('§3.4 — stores', () => {
 		}
 	});
 
+	/**
+	 * §3.4: STORE_NAME_TAKEN applies to PATCH too, not only POST. Every existing
+	 * collision test renames via createStore; this is the one that renames an
+	 * EXISTING store onto another existing store's name, and the one that
+	 * proves the self-exclude works — PATCHing a store to its own current name
+	 * must succeed, not collide with itself.
+	 */
+	test('PATCH rename: a cross-store collision is 409 STORE_NAME_TAKEN; renaming to its own name is not a self-collision', async () => {
+		const { h, locals } = ctx();
+		try {
+			const migros = await createStore(locals, 'Migros');
+			const bim = await createStore(locals, 'BIM');
+
+			const collide = await call(storeRoute.PATCH, {
+				locals,
+				params: { storeId: bim.id },
+				request: jsonRequest({ name: 'MIGROS' }, 'PATCH')
+			});
+			expect(collide.status).toBe(409);
+			const collideBody = await bodyOf(collide);
+			expect(collideBody.error.code).toBe('STORE_NAME_TAKEN');
+			expect(collideBody.storeId).toBe(migros.id);
+			// Nothing was renamed on the rejected side.
+			expect(
+				(await bodyOf(await call(storesRoute.GET, { locals, url: url() }))).stores.find(
+					(s: any) => s.id === bim.id
+				).name
+			).toBe('BIM');
+
+			const self = await call(storeRoute.PATCH, {
+				locals,
+				params: { storeId: migros.id },
+				request: jsonRequest({ name: 'Migros' }, 'PATCH')
+			});
+			expect(self.status).toBe(200);
+			expect((await bodyOf(self)).store.name).toBe('Migros');
+		} finally {
+			h.close();
+		}
+	});
+
 	test('an unrecognised colour is 400 VALIDATION_FAILED', async () => {
 		const { h, locals } = ctx();
 		try {
@@ -390,7 +431,7 @@ describe('§3.5 — list and items', () => {
 		}
 	});
 
-	test('404 ITEM_NOT_FOUND for an unknown or soft-deleted item on tick', async () => {
+	test('404 ITEM_NOT_FOUND for an unknown or soft-deleted item on tick; DELETE differs only for the already-deleted case (R-10)', async () => {
 		const { h, locals } = ctx();
 		try {
 			const store = await createStore(locals);
@@ -408,6 +449,22 @@ describe('§3.5 — list and items', () => {
 				expect(res.status).toBe(404);
 				expect((await bodyOf(res)).error.code).toBe('ITEM_NOT_FOUND');
 			}
+
+			// DELETE itself: an id that never existed still 404s, exactly like its
+			// siblings above.
+			const neverExisted = await call(itemRoute.DELETE, {
+				locals,
+				params: { itemId: randomUUID() }
+			});
+			expect(neverExisted.status).toBe(404);
+			expect((await bodyOf(neverExisted)).error.code).toBe('ITEM_NOT_FOUND');
+
+			// But R-10 makes a REPEAT delete of the already-soft-deleted item above
+			// idempotent success, not 404 — the one place DELETE's "unknown or
+			// soft-deleted" case parts ways with tick/untick/patch.
+			const again = await call(itemRoute.DELETE, { locals, params: { itemId: added.item.id } });
+			expect(again.status).toBe(200);
+			expect((await bodyOf(again)).item.id).toBe(added.item.id);
 		} finally {
 			h.close();
 		}
@@ -520,6 +577,17 @@ describe('§3.6 — history routes', () => {
 			const detail = await bodyOf(await call(tripRoute.GET, { locals, params: { tripId: firstTrip } }));
 			expect(detail.trip.id).toBe(firstTrip);
 			expect(detail.items.map((i: any) => i.state)).toEqual(['carried']);
+		} finally {
+			h.close();
+		}
+	});
+
+	test('GET /trips/{tripId} 404s TRIP_NOT_FOUND for a well-formed id that never existed', async () => {
+		const { h, locals } = ctx();
+		try {
+			const res = await call(tripRoute.GET, { locals, params: { tripId: randomUUID() } });
+			expect(res.status).toBe(404);
+			expect((await bodyOf(res)).error.code).toBe('TRIP_NOT_FOUND');
 		} finally {
 			h.close();
 		}
@@ -711,12 +779,93 @@ describe('§3.1 — the error envelope', () => {
 		}
 	});
 
+	/**
+	 * `readJson`'s body-shape guard. A malformed-JSON body (above) never reaches
+	 * this check — `JSON.parse` already threw. These four ARE valid JSON, so
+	 * without the `parsed === null || typeof parsed !== 'object' ||
+	 * Array.isArray(parsed)` guard they sail past the `try/catch` and into
+	 * `body.name` — which throws for `null` and is merely `undefined` for the
+	 * others, but none of them is the JSON *object* §3.1 requires. The
+	 * deliberately-empty body (`''`, parsed as `{}`) is NOT here: that is the
+	 * one non-object-shaped input the guard must let through.
+	 */
+	test('a non-object JSON body (null, array, string, number) is 400 VALIDATION_FAILED, never a 500', async () => {
+		const { h, locals } = ctx();
+		try {
+			for (const raw of [null, [], 'x', 42]) {
+				const res = await call(storesRoute.POST, { locals, request: jsonRequest(raw) });
+				expect(res.status, JSON.stringify(raw)).toBe(400);
+				const body = await bodyOf(res);
+				expect(body.error.code, JSON.stringify(raw)).toBe('VALIDATION_FAILED');
+				// The message is asserted, not just the code, and §3.1 pins it for
+				// exactly this reason: only `null` reaches a field access and 500s
+				// without the guard. An array, string or number just makes every
+				// field `undefined`, so `storeName` produces its OWN 400 and the
+				// code alone cannot tell whether the body-shape guard ran at all.
+				expect(body.error.message, JSON.stringify(raw)).toBe('Request body must be a JSON object.');
+			}
+			// An empty body is NOT a non-object: §3.1 reads it as `{}`, and the
+			// guard must let it through to the field validators.
+			const empty = await call(storesRoute.POST, {
+				locals,
+				request: new Request('http://localhost/api/stores', { method: 'POST', body: '' })
+			});
+			expect((await bodyOf(empty)).error.message).not.toBe('Request body must be a JSON object.');
+		} finally {
+			h.close();
+		}
+	});
+
+	/**
+	 * `handle()`'s "nothing else leaks" promise. A DomainError's own message is
+	 * always safe to show (§3.1) — the promise this test is for is about
+	 * everything ELSE: a plain `Error` thrown by a real dependency (here, the
+	 * database handle itself) must never reach the client as its own message.
+	 * The db is swapped for a stub via the `setDb` test seam (owned by this
+	 * agent, not a hook added to responses.ts) so a real route's real call to
+	 * `getDb()` fails with a plain `Error` carrying a detail that must never be
+	 * echoed back.
+	 */
+	test('a non-DomainError never leaks its message; the client gets the generic string', async () => {
+		const { h, locals } = ctx();
+		try {
+			const secret = 'ECONNRESET at zembil.db line 42 during checkpoint';
+			const originalError = console.error;
+			console.error = () => {};
+			try {
+				setDb({
+					prepare() {
+						throw new Error(secret);
+					}
+				} as any);
+				const res = await call(storesRoute.GET, { locals, url: url() });
+				expect(res.status).toBe(500);
+				const body = await bodyOf(res);
+				expect(body.error.code).toBe('INTERNAL');
+				expect(body.error.message).toBe('Something went wrong. Please try again.');
+				const wire = JSON.stringify(body);
+				expect(wire).not.toContain(secret);
+				expect(wire).not.toContain('ECONNRESET');
+				expect(wire).not.toContain('checkpoint');
+			} finally {
+				console.error = originalError;
+			}
+		} finally {
+			h.close();
+		}
+	});
+
 	test('every error body has exactly the code/message pair and no nested recovery data', async () => {
 		const { h, locals } = ctx();
 		try {
 			const res = await call(listRoute.GET, { locals, params: { storeId: randomUUID() } });
 			expect(res.status).toBe(404);
 			const body = await bodyOf(res);
+			// getOpenList has two 404 guards in sequence — getStoreSummary's
+			// STORE_NOT_FOUND, then a TRIP_NOT_FOUND fallback if a store somehow had
+			// no open trip. A random, never-existed storeId must fail on the FIRST
+			// one; asserting only the status leaves that indistinguishable.
+			expect(body.error.code).toBe('STORE_NOT_FOUND');
 			expect(Object.keys(body)).toEqual(['error']);
 			expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
 			expect(res.headers.get('content-type')).toContain('application/json');

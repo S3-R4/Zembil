@@ -108,6 +108,12 @@ describe('connection pragmas (§1.1)', () => {
 	test('a bad busy_timeout is rejected rather than interpolated', () => {
 		expect(() => openDatabase('/tmp/zembil-never.db', { busyTimeout: -1 })).toThrow();
 	});
+
+	test('a bad ZEMBIL_SYNCHRONOUS value is rejected rather than interpolated', () => {
+		expect(() =>
+			openDatabase('/tmp/zembil-never-sync.db', { synchronous: 'FAST' as any })
+		).toThrow();
+	});
 });
 
 describe('STRICT tables (D-018)', () => {

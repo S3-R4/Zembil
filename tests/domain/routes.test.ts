@@ -539,6 +539,58 @@ describe('§3.6 — history routes', () => {
 			h.close();
 		}
 	});
+
+	/**
+	 * §3.1b at the query-string layer.
+	 *
+	 * This route used to pre-check its parameters with `!Number.isInteger(n)`,
+	 * a second and weaker copy of rules the domain already enforces — the exact
+	 * pattern §3.1b names as dangerous, since it admits `1e300` and
+	 * `9007199254740993`. It now only converts the string and lets
+	 * `listClosedTrips` be the single validator. These cases go through the real
+	 * route with real query strings, so they cover whichever layer rejects them.
+	 */
+	test('every unparseable or out-of-range trips query parameter is 400 at the route', async () => {
+		const { h, locals } = ctx();
+		try {
+			const store = await createStore(locals);
+			for (const qs of [
+				'limit=0',
+				'limit=-1',
+				'limit=51',
+				'limit=1.5',
+				'limit=abc',
+				'limit=',
+				'limit=9007199254740993',
+				'before=0',
+				'before=-1',
+				'before=1.5',
+				'before=abc',
+				'before=',
+				'before=1e300',
+				'before=9007199254740993', // isInteger true, isSafeInteger false
+				'before=Infinity'
+			]) {
+				const res = await call(tripsRoute.GET, {
+					locals,
+					params: { storeId: store.id },
+					url: url(`http://localhost/api/stores/x/trips?${qs}`)
+				});
+				expect(res.status, qs).toBe(400);
+				expect((await bodyOf(res)).error.code, qs).toBe('VALIDATION_FAILED');
+			}
+
+			// Omitting both is still the documented default page, not a 400.
+			const res = await call(tripsRoute.GET, {
+				locals,
+				params: { storeId: store.id },
+				url: url('http://localhost/api/stores/x/trips')
+			});
+			expect(res.status).toBe(200);
+		} finally {
+			h.close();
+		}
+	});
 });
 
 describe('§4 — GET /api/events', () => {

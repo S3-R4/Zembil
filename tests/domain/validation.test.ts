@@ -161,6 +161,65 @@ describe('other scalar inputs', () => {
 		}
 	});
 
+	/**
+	 * §3.1b, and a lesson about where a test aims.
+	 *
+	 * The case above passes `{ version: '1' }` with no `name` and no `note`, so
+	 * `updateItem`'s "nothing to update" guard fires FIRST and `itemVersion` is
+	 * never reached. The whole validator could be replaced by `Number(value)`
+	 * and the suite would stay green — an audit proved exactly that. Every case
+	 * here carries a `name`, so validation is what rejects it.
+	 */
+	test('PATCH /items rejects a version that is not a safe integer >= 1, reaching the validator', () => {
+		const { h, actor, store } = ctx();
+		try {
+			const added = addItem(h.db, store.id, { name: 'Milk', clientId: randomUUID() }, actor);
+			for (const version of [
+				0, // versions start at 1
+				-1,
+				1.5,
+				9007199254740993, // isInteger true, isSafeInteger false — the §3.1b case
+				1e300,
+				NaN,
+				Infinity,
+				'1',
+				null,
+				undefined
+			]) {
+				expectValidationFailure(() =>
+					updateItem(h.db, added.item.id, { name: 'Bread', version } as any)
+				);
+			}
+			// The item is untouched: no name change slipped through on a rejected version.
+			const row = h.db.prepare('SELECT name, version FROM items WHERE id = ?').get(added.item.id) as any;
+			expect(row.name).toBe('Milk');
+			expect(row.version).toBe(added.item.version);
+		} finally {
+			h.close();
+		}
+	});
+
+	/**
+	 * §3.1b — the trip-history cursor. `before` reaches a `WHERE t.seq < ?` bind,
+	 * and had no test of any kind: gutting `beforeSeq` left all 146 tests green.
+	 */
+	test('GET /trips rejects a before cursor that is not a safe integer >= 1', () => {
+		const { h, store } = ctx();
+		try {
+			for (const before of [0, -1, 1.5, 9007199254740993, 1e300, NaN, Infinity, '1', null]) {
+				expectValidationFailure(() => listClosedTrips(h.db, store.id, { before }));
+			}
+			// And the same for `limit`, whose §3.1b range is 1–50.
+			for (const limit of [0, -1, 51, 1.5, 9007199254740993, NaN, '10', null]) {
+				expectValidationFailure(() => listClosedTrips(h.db, store.id, { limit }));
+			}
+			// A valid cursor still works, so the bound is not simply rejecting everything.
+			expect(listClosedTrips(h.db, store.id, { before: 1, limit: 50 }).trips).toEqual([]);
+		} finally {
+			h.close();
+		}
+	});
+
 	test('PATCH /stores with an empty body is 400, not a silent rev bump', () => {
 		const { h, store } = ctx();
 		try {

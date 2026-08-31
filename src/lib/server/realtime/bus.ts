@@ -31,9 +31,13 @@ function deliver(stream: Stream, event: ZembilEvent): void {
 	try {
 		stream.send(event);
 	} catch {
-		// A dead stream must never take down the writer that emitted it. Drop it;
-		// the route's cancel handler will also unsubscribe, and both are safe.
-		streams.delete(stream);
+		// A dead stream must never take down the writer that emitted it. Tear it
+		// down rather than merely dropping it: dropping alone leaves the HTTP
+		// response open and off the bus, so the connection lingers holding a file
+		// descriptor while receiving nothing. `terminate` is re-entrant-safe here
+		// because it deletes before it closes, and the route's cancel handler will
+		// also unsubscribe — both are idempotent.
+		terminate(stream);
 	}
 }
 

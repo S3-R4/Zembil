@@ -332,9 +332,12 @@ Idempotent in the same way. Allowed only while the trip is open.
 **R-6 — Close is one atomic transaction.** `POST /api/stores/{storeId}/trips/close` runs entirely
 inside `BEGIN IMMEDIATE … COMMIT`, in this order:
 
-1. Re-read the trip `FOR` the given `tripId`. If its `status` is not `'open'`, or its `store_id` does
-   not match, `ROLLBACK` and return `409 TRIP_ALREADY_CLOSED` including the store's current open trip
-   id so the client can simply navigate.
+1. Re-read the trip for the given `tripId`. If **no such trip exists**, `ROLLBACK` and return
+   `404 TRIP_NOT_FOUND` — trips are never deleted, so a `tripId` that has never existed is a client
+   bug or a guess, not stale state, and answering it with a recoverable `409` hides that the same way
+   a `409` on a malformed body would (§3.5). If the trip exists but its `status` is not `'open'`, or
+   its `store_id` does not match, `ROLLBACK` and return `409 TRIP_ALREADY_CLOSED` including the
+   store's current open trip id so the client can simply navigate.
 2. If the trip has **zero** non-deleted items, `ROLLBACK` and return `409 TRIP_EMPTY`. Closing an
    empty trip would write a meaningless entry into history.
 3. Set the trip `status='closed'`, `closed_at=now`, `closed_by=actor`.
@@ -387,6 +390,13 @@ re-adding it is one tap from the history screen. This is a deliberate boundary, 
 
 **R-10 — Delete.** Delete is a soft delete (`deleted_at=now`). A pending item deleted before close is
 **not** carried. Deleting is idempotent — deleting an already-deleted item returns success.
+
+Where R-10 meets R-8 and R-14, **idempotency wins**: deleting an already-deleted item returns `200`
+even if its trip has since closed or its store has been archived, where a *first* delete would return
+`409`. The rules genuinely conflict and the code must not be left to pick silently. This precedence is
+the right one because the alternative punishes a client for a retry it could not know was
+unnecessary — the delete already happened, nothing is written, no `rev` is bumped and no event is
+emitted, so answering `409` would report a failure for an operation whose effect is already in place.
 
 **R-11 — Concurrent close.** Two simultaneous close requests for the same trip: `BEGIN IMMEDIATE`
 serializes them, the second fails its status re-read at step 1, and returns `409 TRIP_ALREADY_CLOSED`.
@@ -529,6 +539,39 @@ user is a `500`, and a `500` on a 250-character paste into the add sheet is a de
 | `displayName` | `POST`/`PATCH /admin/users` | trim; 1–60 |
 | `password` / `newPassword` | login, password change | **not** trimmed — leading and trailing spaces are part of the secret; 12–256 |
 | `clientId` | `POST /items` | must parse as a UUID; rejected otherwise |
+
+### 3.1b Numeric input validation
+
+`Number.isInteger` is **not** sufficient and must not be used to validate an integer that will be
+written. It returns `true` for `1e300` and for `9007199254740993`, and both reach the database:
+
+| Input | Outcome |
+|---|---|
+| `1e300` | STRICT rejects the bind — `cannot store REAL value in INTEGER column` — and the user gets a `500`, exactly the §3.1a failure mode |
+| `9007199254740993` | **commits**, as `9007199254740992`. `node:sqlite` has BigInt off (§1.1a), so every later read of that row throws `RangeError [ERR_OUT_OF_RANGE]` |
+
+The second is the dangerous one and it was reproduced end to end: one `PATCH /api/stores/{id}` body
+from any authenticated family member poisons `stores.sort_order`, and from that moment `GET
+/api/stores`, `POST /api/stores` and that store's `GET /list` are `500` for **everyone**, permanently,
+with no way back through the API — only direct database surgery. A single request, one low-privilege
+session, unrecoverable.
+
+Therefore, for every numeric field in every request body:
+
+| Field | Rule |
+|---|---|
+| `sortOrder` | `Number.isSafeInteger`, and within `[-2147483648, 2147483647]` |
+| `version` | `Number.isSafeInteger`, `>= 1` |
+| `before` (trip history cursor) | `Number.isSafeInteger`, `>= 1` |
+| `limit` | integer 1–50 (§3.6) |
+
+`Number.isSafeInteger` is the floor for anything that will be **written**; a range bound on top of it
+is required wherever the contract says a client-supplied integer is stored directly, which today is
+`sortOrder` alone (R-15). Anything failing is `400 VALIDATION_FAILED`. This rule exists because
+"validate before the write" (§3.1a) is not enough on its own when the validator itself accepts values
+the driver cannot round-trip.
+
+### 3.1c Trimming
 
 Trim means Unicode whitespace, and the trimmed value is what is stored. Anything failing a rule is
 `400 VALIDATION_FAILED`. The DDL's length `CHECK`s are set at the same numbers and exist as the
@@ -690,6 +733,13 @@ NULL`. On a hit, return `200` with that item (which may live on a **later** trip
 expected) instead of `201`. `201 → { "item": Item }`. The client generates one `clientId` per compose,
 reuses it across every retry of that compose, and generates a fresh one only for a new item.
 `409 STORE_ARCHIVED` if archived. `sort_order` is assigned per R-15.
+
+**At most 2000 non-deleted items per trip.** Beyond that, `409 TRIP_ITEM_LIMIT`. A family shopping
+list reaches a few dozen; the cap exists because `GET /stores/{id}/list` and `GET /trips/{id}` return
+every item with no pagination, and one authenticated member — the stated threat model is that every
+account holder is a person who could be careless or compromised — should not be able to make a
+response unbounded, or the database unbounded, by looping an endpoint. It is high enough that no real
+list will ever meet it and low enough that meeting it cannot hurt.
 
 **Every item-mutating response carries `rev`.** `POST /items`, `PATCH /items/{id}`,
 `DELETE /items/{id}`, `tick` and `untick` all return `{ "item": Item, "rev": number }` (delete returns

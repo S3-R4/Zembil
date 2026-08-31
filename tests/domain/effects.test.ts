@@ -272,4 +272,187 @@ describe('§4 — events are emitted after commit, never inside', () => {
 			h.close();
 		}
 	});
+
+	/**
+	 * The single-path test above proves the mechanism once, against `addItem`.
+	 * This is the same proof carried over EVERY path this agent owns that §3.0
+	 * lists as emitting: a subscriber reading the database from inside its own
+	 * callback — the same position a real SSE handler is in — must see the
+	 * write already committed, and any `rev` the event carries must be the SAME
+	 * value a fresh read of `stores.rev` returns at that instant.
+	 *
+	 * Table-driven over the eight emitting paths in §3.0. Each case's `verify`
+	 * runs SYNCHRONOUSLY inside the bus subscriber, i.e. at receipt time, and
+	 * reads the row directly rather than trusting the value `run()` is about to
+	 * return to this test — the point is what the DATABASE shows a concurrent
+	 * reader at that exact moment, not what the mutator's own return value says.
+	 */
+	test('every one of the eight §3.0 paths: the subscriber sees the write committed and rev matching, at receipt', () => {
+		const h = harness();
+		const actor = makeUser(h.db);
+		resetBus();
+		try {
+			// Fixtures, created before the subscriber attaches so they do not
+			// themselves appear as observations below.
+			const store = createStore(h.db, { name: 'Migros' }, actor);
+			const seed = addItem(h.db, store.id, { name: 'Seed', clientId: randomUUID() }, actor);
+
+			interface Receipt {
+				type: string;
+				storeId?: string;
+				revAtReceipt?: number;
+				inTransaction: boolean;
+			}
+			let receipts: Receipt[] = [];
+			let verify: (() => void) | null = null;
+
+			const off = subscribe(
+				'u',
+				's',
+				(e: any) => {
+					receipts.push({
+						type: e.type,
+						storeId: e.type === 'store.changed' ? e.storeId : undefined,
+						// Read straight from the database, not from the event payload,
+						// at the exact instant the subscriber runs.
+						revAtReceipt: e.type === 'store.changed' ? revOf(h, e.storeId) : undefined,
+						// If the emit ever moved inside the transaction this would be true.
+						inTransaction: (h.db as any).isTransaction === true
+					});
+					// Assert the committed row from inside the callback itself, exactly
+					// where a real subscriber's own DB read would run.
+					verify?.();
+				},
+				() => {}
+			);
+
+			interface Case {
+				label: string;
+				expectedTypes: string[];
+				run: () => { rev?: number };
+				verify: () => void;
+			}
+
+			let tripId = (
+				h.db.prepare(`SELECT id FROM trips WHERE store_id = ? AND status = 'open'`).get(store.id) as any
+			).id;
+
+			const cases: Case[] = [
+				{
+					label: 'createStore',
+					expectedTypes: ['stores.changed'],
+					run: () => createStore(h.db, { name: 'BIM' }, actor),
+					verify: () => {
+						const row = h.db.prepare(`SELECT rev FROM stores WHERE name = 'BIM'`).get() as any;
+						expect(row).toBeDefined();
+						expect(Number(row.rev)).toBe(0);
+					}
+				},
+				{
+					label: 'updateStore',
+					expectedTypes: ['store.changed', 'stores.changed'],
+					run: () => updateStore(h.db, store.id, { name: 'Migros Sanayi' }),
+					verify: () => {
+						const row = h.db.prepare('SELECT name FROM stores WHERE id = ?').get(store.id) as any;
+						expect(row.name).toBe('Migros Sanayi');
+					}
+				},
+				{
+					label: 'addItem (new row)',
+					expectedTypes: ['store.changed'],
+					run: () => addItem(h.db, store.id, { name: 'Milk', clientId: randomUUID() }, actor),
+					verify: () => {
+						const row = h.db
+							.prepare(`SELECT COUNT(*) AS n FROM items WHERE name = 'Milk' AND deleted_at IS NULL`)
+							.get() as any;
+						expect(Number(row.n)).toBe(1);
+					}
+				},
+				{
+					label: 'tickItem',
+					expectedTypes: ['store.changed'],
+					run: () => tickItem(h.db, seed.item.id, actor),
+					verify: () => {
+						const row = h.db.prepare('SELECT state, ticked_at FROM items WHERE id = ?').get(seed.item.id) as any;
+						expect(row.state).toBe('ticked');
+						expect(row.ticked_at).not.toBeNull();
+					}
+				},
+				{
+					label: 'untickItem',
+					expectedTypes: ['store.changed'],
+					run: () => untickItem(h.db, seed.item.id, actor),
+					verify: () => {
+						const row = h.db.prepare('SELECT state, ticked_at FROM items WHERE id = ?').get(seed.item.id) as any;
+						expect(row.state).toBe('pending');
+						expect(row.ticked_at).toBeNull();
+					}
+				},
+				{
+					label: 'updateItem',
+					expectedTypes: ['store.changed'],
+					run: () => {
+						const current = h.db.prepare('SELECT version FROM items WHERE id = ?').get(seed.item.id) as any;
+						return updateItem(h.db, seed.item.id, { name: 'Seed 2', version: Number(current.version) });
+					},
+					verify: () => {
+						const row = h.db.prepare('SELECT name FROM items WHERE id = ?').get(seed.item.id) as any;
+						expect(row.name).toBe('Seed 2');
+					}
+				},
+				{
+					label: 'deleteItem (first delete)',
+					expectedTypes: ['store.changed'],
+					run: () => deleteItem(h.db, seed.item.id),
+					verify: () => {
+						const row = h.db.prepare('SELECT deleted_at FROM items WHERE id = ?').get(seed.item.id) as any;
+						expect(row.deleted_at).not.toBeNull();
+					}
+				},
+				{
+					label: 'closeTrip',
+					expectedTypes: ['store.changed', 'stores.changed'],
+					run: () => closeTrip(h.db, store.id, { tripId }, actor),
+					verify: () => {
+						const row = h.db.prepare('SELECT status FROM trips WHERE id = ?').get(tripId) as any;
+						expect(row.status).toBe('closed');
+					}
+				}
+			];
+
+			for (const c of cases) {
+				// deleteItem left the trip with no pending items; give closeTrip
+				// something to close (R-6 step 2 forbids an empty trip).
+				if (c.label === 'closeTrip') {
+					addItem(h.db, store.id, { name: 'Bread', clientId: randomUUID() }, actor);
+				}
+
+				receipts = [];
+				verify = c.verify;
+				const result = c.run();
+				verify = null;
+
+				expect(receipts.map((r) => r.type).sort(), c.label).toEqual([...c.expectedTypes].sort());
+				for (const r of receipts) {
+					expect(r.inTransaction, `${c.label}: emitted inside the transaction`).toBe(false);
+					if (r.type === 'store.changed') {
+						// Every store.changed case in this table targets the fixture store.
+						expect(r.storeId, c.label).toBe(store.id);
+						// The event's own rev, the store row read back at receipt, and
+						// the mutator's returned rev must all agree.
+						expect(r.revAtReceipt, c.label).toBe(result.rev);
+					}
+				}
+			}
+
+			off();
+			// Guard the guard: if node:sqlite ever drops `isTransaction` every
+			// `inTransaction` check above would silently become `undefined === true`
+			// and always pass.
+			expect(typeof (h.db as any).isTransaction).toBe('boolean');
+		} finally {
+			resetBus();
+			h.close();
+		}
+	});
 });

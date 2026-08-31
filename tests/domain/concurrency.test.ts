@@ -14,9 +14,54 @@ import { createStore } from '$lib/server/domain/stores';
 import { addItem, getOpenList } from '$lib/server/domain/items';
 import { closeTrip } from '$lib/server/domain/trips';
 import { isDomainError } from '$lib/server/domain/errors';
+import type { Db } from '$lib/server/db';
 
 const openTrip = (h: Harness, storeId: string): string =>
 	(h.db.prepare(`SELECT id FROM trips WHERE store_id=? AND status='open'`).get(storeId) as any).id;
+
+/**
+ * Intercepts the FIRST call to the exact SQL text R-6 step 1 uses to re-read
+ * the trip, and runs `onRead` synchronously in the gap BEFORE the real
+ * statement executes — i.e. after this transaction's read but before its
+ * write. This is how the race is constructed deterministically in a
+ * single-threaded, synchronous `node:sqlite` process: there is no other way
+ * to land a second connection's full transaction inside one statement's gap
+ * without controlling exactly which statement triggers it.
+ *
+ * `db.prepare(...)` and every returned `Statement` method is invoked with the
+ * REAL connection as `this`, never the proxy — `node:sqlite`'s native classes
+ * brand-check their receiver, and calling a native method through a Proxy
+ * throws "Illegal invocation" otherwise.
+ */
+function raceOnTripRead(realDb: Db, onRead: () => void): Db {
+	let fired = false;
+	const TARGET_SQL = 'SELECT * FROM trips WHERE id = ?'; // trips.ts, R-6 step 1
+	return new Proxy(realDb, {
+		get(target, prop) {
+			if (prop === 'prepare') {
+				return (sql: string, ...rest: unknown[]) => {
+					const stmt = (target as any).prepare(sql, ...rest);
+					if (!fired && sql === TARGET_SQL) {
+						return {
+							get(...args: unknown[]) {
+								if (!fired) {
+									fired = true;
+									onRead();
+								}
+								return stmt.get(...args);
+							},
+							run: stmt.run.bind(stmt),
+							all: stmt.all.bind(stmt)
+						};
+					}
+					return stmt;
+				};
+			}
+			const value = (target as any)[prop];
+			return typeof value === 'function' ? value.bind(target) : value;
+		}
+	}) as Db;
+}
 
 function ctx() {
 	// A short busy_timeout keeps the "the writer is genuinely locked out" tests
@@ -115,6 +160,69 @@ describe('R-11 — concurrent close', () => {
 				.get() as any;
 			expect(Number(clones.n)).toBe(2);
 			expect(getOpenList(h.db, store.id).items).toHaveLength(2);
+			expect(checkAll(h.db)).toEqual([]);
+		} finally {
+			h.close();
+		}
+	});
+
+	/**
+	 * `tx()` uses `BEGIN IMMEDIATE`, which takes the write lock BEFORE the first
+	 * statement inside the transaction ever runs — including R-6 step 1's re-read
+	 * of the trip. This test lands a rival's FULL close (its own real `closeTrip`
+	 * call, on a second connection) exactly in the gap between our step-1 read
+	 * and our step-3 write, using `raceOnTripRead` above.
+	 *
+	 * Under `BEGIN IMMEDIATE` the rival cannot get in at all: the write lock is
+	 * already ours before the read runs, so the rival's own `BEGIN IMMEDIATE`
+	 * blocks and times out (`ERR_SQLITE_ERROR`, errcode 5, SQLITE_BUSY) — and our
+	 * own close completes normally.
+	 *
+	 * Downgrading `tx()` to a plain deferred `BEGIN` was verified to turn this
+	 * red: the rival's `BEGIN IMMEDIATE` no longer contends with anything (our
+	 * transaction has taken no lock yet), so the rival's close lands cleanly and
+	 * commits. Our transaction's snapshot was fixed at its earlier read, so when
+	 * it then reaches step 3's `UPDATE trips SET status='closed' ...` — a write
+	 * against a row the rival already moved — SQLite refuses with
+	 * `ERR_SQLITE_ERROR`, errcode 517 (SQLITE_BUSY_SNAPSHOT), which `busy_timeout`
+	 * does not retry. That raw error reaches the caller instead of the clean
+	 * `409 TRIP_ALREADY_CLOSED` R-11 mandates.
+	 */
+	test('BEGIN IMMEDIATE closes the gap a deferred BEGIN would leave between the status re-read and the close write', () => {
+		const { h, actor, store } = ctx();
+		try {
+			addItem(h.db, store.id, { name: 'Milk', clientId: randomUUID() }, actor);
+			const tripId = openTrip(h, store.id);
+			const rival = h.second({ busyTimeout: 80 });
+
+			let rivalError: any = null;
+			let rivalResult: any = null;
+			const spyDb = raceOnTripRead(h.db, () => {
+				try {
+					rivalResult = closeTrip(rival, store.id, { tripId }, actor);
+				} catch (err) {
+					rivalError = err;
+				}
+			});
+
+			let caught: any = null;
+			let result: any = null;
+			try {
+				result = closeTrip(spyDb, store.id, { tripId }, actor);
+			} catch (err) {
+				caught = err;
+			}
+
+			// The rival could not land in the gap: it never even committed.
+			expect(rivalResult).toBeNull();
+			expect(rivalError).toBeDefined();
+			expect(rivalError.code).toBe('ERR_SQLITE_ERROR');
+			expect(rivalError.errcode).toBe(5); // SQLITE_BUSY, not a snapshot conflict
+
+			// Our own close, whose read the rival tried to race, completed
+			// normally — no raw SQLite error ever reached this caller.
+			expect(caught).toBeNull();
+			expect(result.closedTrip.status).toBe('closed');
 			expect(checkAll(h.db)).toEqual([]);
 		} finally {
 			h.close();

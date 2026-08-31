@@ -68,8 +68,19 @@ export function storeColor(value: unknown): StoreColor {
 	return value as StoreColor;
 }
 
+/**
+ * §3.1b. `Number.isSafeInteger`, never `Number.isInteger`.
+ *
+ * `Number.isInteger` returns true for `1e300` and for `9007199254740993`, and
+ * both reach the database. `1e300` is a REAL, which a STRICT table rejects on
+ * bind — a 500 where §3.1a promises a 400. `9007199254740993` is worse: it
+ * COMMITS, as `9007199254740992`, and because `node:sqlite` has BigInt off
+ * (§1.1a) every later read of that row throws `RangeError [ERR_OUT_OF_RANGE]`.
+ * One PATCH body from any authenticated family member would make `GET
+ * /api/stores` a permanent 500 for everyone, with no way back through the API.
+ */
 export function integer(value: unknown, field: string): number {
-	if (typeof value !== 'number' || !Number.isInteger(value)) {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
 		throw validationFailed(`${field} must be a whole number.`);
 	}
 	return value;
@@ -85,6 +96,22 @@ export function boundedInt(value: unknown, field: string, min: number, max: numb
 	if (n < min || n > max) throw validationFailed(`${field} must be between ${min} and ${max}.`);
 	return n;
 }
+
+/** §3.1b: a range bound on top of `isSafeInteger` wherever a client-supplied
+ *  integer is STORED DIRECTLY, which today is `sortOrder` alone (R-15). */
+export const INT32_MIN = -2147483648;
+export const INT32_MAX = 2147483647;
+
+export const sortOrder = (value: unknown) =>
+	boundedInt(value, 'sortOrder', INT32_MIN, INT32_MAX);
+
+/** §3.1b: `isSafeInteger`, `>= 1`. Not written today; it shares the helper. */
+export const itemVersion = (value: unknown) =>
+	boundedInt(value, 'version', 1, Number.MAX_SAFE_INTEGER);
+
+/** §3.1b: the trip history cursor — `isSafeInteger`, `>= 1`. `trips.seq >= 1`. */
+export const beforeSeq = (value: unknown) =>
+	boundedInt(value, 'before', 1, Number.MAX_SAFE_INTEGER);
 
 /** NFKC + lowercase + collapsed whitespace — the `stores.name_key` normalization. */
 export function storeNameKey(name: string): string {

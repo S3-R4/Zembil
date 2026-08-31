@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { bodyOf, harness, jsonRequest, localsFor, makeUser, type Harness } from './_support';
 import { setDb } from '$lib/server/db';
-import { resetBus } from '$lib/server/realtime/bus';
+import { emitStoresChanged, resetBus, streamCount } from '$lib/server/realtime/bus';
 
 import * as storesRoute from '../../src/routes/api/stores/+server';
 import * as storeRoute from '../../src/routes/api/stores/[storeId]/+server';
@@ -166,6 +166,92 @@ describe('§3.4 — stores', () => {
 			});
 			expect(res.status).toBe(400);
 			expect((await bodyOf(res)).error.code).toBe('VALIDATION_FAILED');
+		} finally {
+			h.close();
+		}
+	});
+
+	/**
+	 * §3.1b, as an attack rather than a unit test.
+	 *
+	 * `Number.isInteger(9007199254740993)` is `true`, and the value COMMITS as
+	 * `9007199254740992`. With BigInt off (§1.1a) every later read of that row
+	 * throws `RangeError [ERR_OUT_OF_RANGE]`, so one PATCH body from one ordinary
+	 * family member turns `GET /api/stores`, `POST /api/stores` and that store's
+	 * `GET /list` into permanent 500s for everyone, unrecoverable through the API.
+	 *
+	 * The 400 is half the test. The assertions AFTER it are the ones that matter:
+	 * they prove the poisoning is impossible, not merely rejected on one path.
+	 */
+	test('a sortOrder the driver cannot round-trip is 400 and cannot poison the store list', async () => {
+		const { h, locals } = ctx();
+		try {
+			const store = await createStore(locals);
+			const before = (await bodyOf(await call(storesRoute.GET, { locals, url: url() }))).stores;
+
+			for (const sortOrder of [
+				9007199254740993, // isInteger true; commits as 2^53, then every read throws
+				9007199254740992,
+				1e300, // isInteger true; a REAL, which STRICT refuses to bind — a 500
+				-1e300,
+				2147483648, // outside the §3.1b range bound
+				-2147483649,
+				Number.MAX_SAFE_INTEGER,
+				1.5,
+				NaN,
+				Infinity,
+				'7',
+				null
+			]) {
+				const res = await call(storeRoute.PATCH, {
+					locals,
+					params: { storeId: store.id },
+					request: jsonRequest({ sortOrder }, 'PATCH')
+				});
+				expect(res.status, String(sortOrder)).toBe(400);
+				expect((await bodyOf(res)).error.code, String(sortOrder)).toBe('VALIDATION_FAILED');
+			}
+
+			// The list still reads. This is the assertion the whole test exists for.
+			const listed = await call(storesRoute.GET, { locals, url: url() });
+			expect(listed.status).toBe(200);
+			expect((await bodyOf(listed)).stores).toEqual(before);
+
+			// And so do the other two endpoints a poisoned row would have taken down.
+			const list = await call(listRoute.GET, { locals, params: { storeId: store.id } });
+			expect(list.status).toBe(200);
+			const created = await call(storesRoute.POST, {
+				locals,
+				request: jsonRequest({ name: 'BIM' })
+			});
+			expect(created.status).toBe(201);
+
+			// The row itself is untouched — nothing was half-written.
+			const raw = h.db.prepare('SELECT sort_order FROM stores WHERE id = ?').get(store.id) as any;
+			expect(Number.isSafeInteger(raw.sort_order)).toBe(true);
+			expect(raw.sort_order).toBe(1000);
+		} finally {
+			h.close();
+		}
+	});
+
+	test('the boundaries of the §3.1b sortOrder range are accepted and stored verbatim', async () => {
+		const { h, locals } = ctx();
+		try {
+			const store = await createStore(locals);
+			for (const sortOrder of [2147483647, -2147483648, 0]) {
+				const res = await call(storeRoute.PATCH, {
+					locals,
+					params: { storeId: store.id },
+					request: jsonRequest({ sortOrder }, 'PATCH')
+				});
+				expect(res.status, String(sortOrder)).toBe(200);
+				expect((await bodyOf(res)).store.sortOrder).toBe(sortOrder);
+				// R-15 writes the client integer directly, so a read-back must survive.
+				expect(
+					(await bodyOf(await call(storesRoute.GET, { locals, url: url() }))).stores[0].sortOrder
+				).toBe(sortOrder);
+			}
 		} finally {
 			h.close();
 		}
@@ -505,6 +591,35 @@ describe('§4 — GET /api/events', () => {
 				expect(payload.v).toBe(1);
 			}
 			await reader.cancel();
+		} finally {
+			h.close();
+		}
+	});
+
+	/**
+	 * `MAX_BUFFERED_CHUNKS` (events/+server.ts): a consumer that stops reading
+	 * must be torn down rather than have `controller.enqueue` buffer every ping
+	 * and every hint in process memory forever (D-028). Never read a byte from
+	 * `res.body` here — that is the point: this reproduces the in-process side
+	 * of a stalled consumer directly, which is the part unit-testable without a
+	 * real socket and megabytes of traffic.
+	 */
+	test('a consumer that stops reading is torn down instead of buffered without bound', async () => {
+		const { h, locals } = ctx();
+		try {
+			const res = await call(eventsRoute.GET, { locals });
+			expect(res.status).toBe(200);
+			expect(streamCount(locals.sessionId!)).toBe(1);
+
+			// Never read res.body: every one of these is an unread chunk piling up
+			// behind the ': connected\n\n' already enqueued at stream start.
+			for (let i = 0; i < 100; i += 1) emitStoresChanged();
+
+			// The stream must have torn itself down well before 100 unread events —
+			// removed from the bus, exactly like any other closed stream.
+			expect(streamCount(locals.sessionId!)).toBe(0);
+
+			await res.body?.cancel();
 		} finally {
 			h.close();
 		}

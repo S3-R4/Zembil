@@ -19,7 +19,7 @@ import {
 	type TripRow
 } from './rows.js';
 import { bumpRev, openTripId, requireStore, type Actor } from './stores.js';
-import { boundedInt, integer } from './validate.js';
+import { beforeSeq, boundedInt } from './validate.js';
 import type { Item, Trip, TripSummary } from '$lib/types';
 
 const now = () => Date.now();
@@ -113,7 +113,14 @@ export function closeTrip(
 		const trip = db.prepare('SELECT * FROM trips WHERE id = ?').get(tripId) as
 			| TripRow
 			| undefined;
-		if (!trip || trip.store_id !== storeId || trip.status !== 'open') {
+		// R-6 step 1: a tripId that has NEVER existed is 404 TRIP_NOT_FOUND, not a
+		// 409. Trips are never deleted, so it cannot be stale state — it is a
+		// client bug or a guess, and a recoverable-looking 409 would hide it
+		// behind a retry loop exactly as it would for a malformed body (§3.5).
+		if (!trip) throw notFound('TRIP_NOT_FOUND', 'Trip not found.');
+		// A trip that EXISTS but is closed, or belongs to another store, is the
+		// genuinely stale case and still gets the 409 with openTripId.
+		if (trip.store_id !== storeId || trip.status !== 'open') {
 			throw conflict('TRIP_ALREADY_CLOSED', 'That trip is already finished.', {
 				openTripId: openTripId(db, storeId) ?? ''
 			});
@@ -196,7 +203,7 @@ export function listClosedTrips(
 ): TripHistoryPage {
 	requireStore(db, storeId);
 	const limit = options.limit === undefined ? 20 : boundedInt(options.limit, 'limit', 1, 50);
-	const before = options.before === undefined ? null : integer(options.before, 'before');
+	const before = options.before === undefined ? null : beforeSeq(options.before);
 
 	const rows = (
 		before === null

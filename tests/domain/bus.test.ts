@@ -188,4 +188,31 @@ describe('§4 — at most 4 concurrent streams per session, oldest closed first'
 		expect(healthy.events).toHaveLength(1);
 		expect(bus.streamCount()).toBe(1);
 	});
+
+	/**
+	 * `deliver()` must TEAR DOWN a dead stream, not merely drop it from the set.
+	 * Dropping alone (`streams.delete(stream)` without calling `stream.close()`)
+	 * would still make `streamCount()` go to zero — the assertion above cannot
+	 * tell the difference — but it leaves the underlying HTTP response open,
+	 * holding a file descriptor while receiving nothing forever. This test's
+	 * `close` callback is NOT a no-op, unlike the one above, specifically so
+	 * that reverting `terminate(stream)` back to a bare `streams.delete(stream)`
+	 * in bus.ts turns it red.
+	 */
+	test('a listener whose send throws is torn down: removed from the bus AND its close callback ran', () => {
+		let closed = false;
+		bus.subscribe(
+			'u1',
+			's1',
+			() => {
+				throw new Error('socket gone');
+			},
+			() => {
+				closed = true;
+			}
+		);
+		expect(() => bus.emitStoresChanged()).not.toThrow();
+		expect(closed).toBe(true);
+		expect(bus.streamCount('s1')).toBe(0);
+	});
 });

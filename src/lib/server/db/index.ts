@@ -81,20 +81,35 @@ export function setDb(db: Db | null): void {
  * mutation in the domain layer goes through this.
  */
 export function tx<T>(db: Db, fn: () => T): T {
+	// BEGIN IMMEDIATE, never a deferred BEGIN: it takes the write lock up front,
+	// so a read-then-write transaction (closeTrip's status re-read at R-6 step 1
+	// followed by its UPDATE at step 3) can never lose its snapshot to a rival
+	// that committed in between. Under a deferred BEGIN the loser of that race
+	// gets SQLITE_BUSY_SNAPSHOT (errcode 517), which busy_timeout does NOT retry,
+	// instead of R-11's mandated 409 TRIP_ALREADY_CLOSED.
 	db.exec('BEGIN IMMEDIATE');
-	let result: T;
 	try {
-		result = fn();
-	} catch (err) {
-		try {
-			db.exec('ROLLBACK');
-		} catch {
-			/* the failing statement may already have unwound the transaction */
+		const result = fn();
+		// COMMIT is inside the try: if it throws, the transaction is still open,
+		// and this is the process's single connection.
+		db.exec('COMMIT');
+		return result;
+	} finally {
+		// A failing statement may already have unwound the transaction; a failing
+		// COMMIT has not. Either way the connection must never be left inside one,
+		// or every later tx() fails with "cannot start a transaction within a
+		// transaction" until the process restarts.
+		if (db.isTransaction) {
+			try {
+				db.exec('ROLLBACK');
+			} catch (rollbackError) {
+				// Nothing can recover this connection from here, and swallowing it
+				// silently is how it would go unnoticed. Log and let the original
+				// error propagate.
+				console.error('[zembil] ROLLBACK failed; connection may be unusable', rollbackError);
+			}
 		}
-		throw err;
 	}
-	db.exec('COMMIT');
-	return result;
 }
 
 /** §1.1a: JavaScript booleans cannot be bound. Convert at the repository boundary. */

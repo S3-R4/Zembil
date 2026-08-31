@@ -569,3 +569,34 @@ not a control.
 **Consequence.** The frontend must handle `403 PASSWORD_CHANGE_REQUIRED` as a redirect to the change
 screen rather than as an error, on any request. Putting the flag on `User` means a reload cannot lose
 it.
+
+---
+
+## D-028 — The SSE stream bound is `desiredSize`, and its real ceiling is the socket buffer
+
+**Decision.** `src/routes/api/events/+server.ts` tears a stream down when
+`controller.desiredSize <= -64`. That bound stays, but it is documented as an *eventual* bound, not a
+64-event one: the measured ceiling per stalled stream is roughly **2.5 MB**, not 64 chunks.
+
+**Rationale.** Measured, not reasoned, against `@sveltejs/kit/node`'s `setResponse` on Node 26.1.0
+with a client that opens the stream and never reads a byte (a paused TCP socket, which is what a
+suspended phone or a deliberate stall actually looks like):
+
+| probe | result |
+| --- | --- |
+| chunks flush as enqueued, nothing buffers to EOF | headers at 29 ms, chunks at 30/47/68 ms — **pass** |
+| client disconnect fires the stream's `cancel` | fires — the route's unsubscribe is reachable, **pass** |
+| `desiredSize` falls for a consumer that stops reading | falls, but only after **27,749 events / 2.51 MB** |
+
+The reason for the gap is that `setResponse` pipes the web stream into the Node response, and the
+kernel and libuv socket buffers absorb everything until they are full. Until then the reader keeps
+pulling and `desiredSize` sits at 1, so the queue bound cannot see a stalled client at all. Only once
+the socket stalls does backpressure reach the `ReadableStream` queue, and then the bound fires
+immediately.
+
+**Consequence.** Worst case is ~2.5 MB per stalled stream, ×4 streams per session (§4) × fewer than
+ten users — bounded, and acceptable for this deployment. It is *not* the tight bound the constant's
+name suggests, so the comment in `+server.ts` must not claim one. Probes 1 and 2 also close two of
+the `PLAN.md` §7 known gaps: adapter-node needs no explicit flush call, and disconnects do not leak
+bus subscriptions. Buffering at the **reverse proxy** is a separate risk and remains M4's problem —
+`proxy_buffering off` for the events endpoint belongs in the deployment notes.

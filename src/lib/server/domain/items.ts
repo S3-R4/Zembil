@@ -15,11 +15,14 @@ import {
 	requireWritableStore,
 	type Actor
 } from './stores.js';
-import { clientId as validateClientId, integer, itemName, itemNote } from './validate.js';
+import { clientId as validateClientId, itemVersion, itemName, itemNote } from './validate.js';
 import type { Item, ItemMutation, StoreSummary, Trip } from '$lib/types';
 import { toTrip, TRIP_SELECT, type TripRow } from './rows.js';
 
 const now = () => Date.now();
+
+/** §3.5: at most 2000 non-deleted items per trip; beyond it, 409 TRIP_ITEM_LIMIT. */
+export const MAX_ITEMS_PER_TRIP = 2000;
 
 /**
  * I-3's enforcement point. `items.store_id` is denormalized from `trips.store_id`,
@@ -148,6 +151,21 @@ export function addItem(
 		}
 
 		const target = resolveOpenTrip(db, storeId);
+
+		// §3.5: at most 2000 non-deleted items per trip. GET /list and
+		// GET /trips/{id} return every item unpaginated, and one account holder —
+		// every account here belongs to a person who could be careless or
+		// compromised, which is the stated threat model — must not be able to make
+		// a response, or the database, unbounded by looping this endpoint. The cap
+		// is checked only on the create path: an R-17 idempotent retry above still
+		// succeeds at the limit, because it writes nothing.
+		const countRow = db
+			.prepare('SELECT COUNT(*) AS n FROM items WHERE trip_id = ? AND deleted_at IS NULL')
+			.get(target.tripId) as { n: number };
+		if (Number(countRow.n) >= MAX_ITEMS_PER_TRIP) {
+			throw conflict('TRIP_ITEM_LIMIT', 'This list is full. Finish the trip to start a new one.');
+		}
+
 		const ts = now();
 		const id = randomUUID();
 
@@ -190,7 +208,7 @@ export function updateItem(
 	if (!hasName && !hasNote) throw validationFailed('Nothing to update.');
 	const name = hasName ? itemName(input.name) : null;
 	const note = hasNote ? itemNote(input.note) : null;
-	const version = integer(input.version, 'version');
+	const version = itemVersion(input.version);
 
 	const result = tx(db, () => {
 		const row = loadItemContext(db, itemId);

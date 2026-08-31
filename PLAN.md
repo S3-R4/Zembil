@@ -187,6 +187,11 @@ cancelled, so the implementing agents must verify these themselves rather than t
 
 1. **`@simplewebauthn` v13's exact API** — read the shipped `.d.ts` files; this API changed
    materially across v9, v10, v11 and v13.
-2. **SSE through `adapter-node`** — confirm nothing compresses or buffers `text/event-stream`.
+2. ~~**SSE through `adapter-node`** — confirm nothing compresses or buffers `text/event-stream`.~~
+   **Closed 2026-08-31.** Probed against `setResponse` on Node 26.1.0: chunks flush as enqueued (no
+   explicit flush call needed), and a client disconnect fires the stream's `cancel`, so bus
+   subscriptions do not leak. The same probe measured the `desiredSize` teardown bound at ~2.5 MB per
+   stalled stream rather than 64 events — see D-028. Reverse-proxy buffering (`proxy_buffering off`)
+   is untested and stays with M4.
 3. **Node 26 base image tags and non-root volume ownership** — confirm against the registry, on the
    target architecture.

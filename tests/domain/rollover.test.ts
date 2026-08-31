@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { harness, makeUser, type Harness, type TestUser } from './_support';
+import { harness, makeUser, recorder, type Harness, type TestUser } from './_support';
 import { checkAll } from './_invariants';
 import { createStore, listStores, updateStore } from '$lib/server/domain/stores';
 import {
@@ -380,6 +380,77 @@ describe('R-10 — delete', () => {
 			expect(deletedAfter.state).toBe('pending');
 			expect(deletedAfter.carried_to_item_id).toBe(null);
 			expect(checkAll(h.db)).toEqual([]);
+		} finally {
+			h.close();
+		}
+	});
+});
+
+/**
+ * Where R-10 meets R-8 and R-14, idempotency wins: deleting an ALREADY-deleted
+ * item returns 200 even after its trip has since closed or its store has since
+ * been archived — where a FIRST delete in either situation is 409 (asserted
+ * above, in R-8's and R-14's own suites). Nothing is written on the repeat, so
+ * §3.0 says it bumps no rev and emits nothing.
+ */
+describe('R-10 meets R-8 and R-14 — idempotency wins the conflict', () => {
+	test('re-deleting an already-deleted item is 200, not 409 TRIP_CLOSED, once its trip has closed', () => {
+		const { h, actor, store } = ctx();
+		try {
+			const gone = add(h, store.id, actor, 'Yoghurt');
+			add(h, store.id, actor, 'Milk'); // keeps the trip non-empty so the close below can succeed
+			const first = deleteItem(h.db, gone.item.id);
+			expect(first.changed).toBe(true);
+
+			closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
+
+			const rec = recorder();
+			const before = Number((h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev);
+			try {
+				// A FIRST delete here would be 409 TRIP_CLOSED (see R-8's suite above).
+				// This item is already gone, and R-10's idempotency wins: 200, not 409.
+				const again = deleteItem(h.db, gone.item.id);
+				expect(again.changed).toBe(false);
+				expect(again.item.id).toBe(gone.item.id);
+				expect(again.rev).toBe(before);
+				// Nothing was written: rev is untouched and nothing was emitted.
+				expect(Number((h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev)).toBe(
+					before
+				);
+				expect(rec.take()).toEqual([]);
+			} finally {
+				rec.stop();
+			}
+		} finally {
+			h.close();
+		}
+	});
+
+	test('re-deleting an already-deleted item is 200, not 409 STORE_ARCHIVED, once its store has been archived', () => {
+		const { h, actor, store } = ctx();
+		try {
+			const gone = add(h, store.id, actor, 'Yoghurt');
+			const first = deleteItem(h.db, gone.item.id);
+			expect(first.changed).toBe(true);
+
+			updateStore(h.db, store.id, { archived: true });
+
+			const rec = recorder();
+			const before = Number((h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev);
+			try {
+				// A FIRST delete here would be 409 STORE_ARCHIVED (see R-14's suite
+				// below). This item is already gone, and R-10's idempotency wins.
+				const again = deleteItem(h.db, gone.item.id);
+				expect(again.changed).toBe(false);
+				expect(again.item.id).toBe(gone.item.id);
+				expect(again.rev).toBe(before);
+				expect(Number((h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev)).toBe(
+					before
+				);
+				expect(rec.take()).toEqual([]);
+			} finally {
+				rec.stop();
+			}
 		} finally {
 			h.close();
 		}

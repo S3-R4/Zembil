@@ -214,20 +214,54 @@ describe('other scalar inputs', () => {
 		}
 	});
 
-	// The other half of the same ruling: a STALE but WELL-FORMED tripId is still
-	// the recoverable 409 carrying openTripId. That path is unchanged.
-	test('close with a stale but well-formed tripId is still 409 TRIP_ALREADY_CLOSED with openTripId', () => {
+	// R-6 step 1: a tripId that has NEVER existed is 404 TRIP_NOT_FOUND, not a
+	// 409. Trips are never deleted, so it cannot be stale state — it is a client
+	// bug, and a recoverable-looking 409 would hide it behind a retry loop that
+	// appears to work, the same reasoning as the malformed-body ruling above.
+	test('close with a well-formed tripId that never existed is 404 TRIP_NOT_FOUND, with no openTripId', () => {
 		const { h, actor, store } = ctx();
 		try {
-			const unknownButWellFormed = randomUUID();
+			const neverExisted = randomUUID();
 			try {
-				closeTrip(h.db, store.id, { tripId: unknownButWellFormed }, actor);
+				closeTrip(h.db, store.id, { tripId: neverExisted }, actor);
 				throw new Error('expected a rejection');
 			} catch (err: any) {
 				expect(isDomainError(err)).toBe(true);
-				expect(err.code).toBe('TRIP_ALREADY_CLOSED');
-				expect(err.status).toBe(409);
-				expect(err.extra.openTripId).toBe(store.openTripId);
+				expect(err.code).toBe('TRIP_NOT_FOUND');
+				expect(err.status).toBe(404);
+				// §3.1: only the three named siblings exist, and this is not one.
+				expect(err.extra).toBeUndefined();
+			}
+			// The store is untouched: the open trip is still the same one.
+			const stillOpen = h.db
+				.prepare(`SELECT id FROM trips WHERE store_id = ? AND status = 'open'`)
+				.get(store.id) as any;
+			expect(stillOpen.id).toBe(store.openTripId);
+		} finally {
+			h.close();
+		}
+	});
+
+	// The other half of the ruling: a trip that EXISTS but is closed, or belongs
+	// to another store, is genuinely stale state and still gets the recoverable
+	// 409 carrying openTripId.
+	test('close of a trip that exists but is closed, or belongs to another store, is 409 TRIP_ALREADY_CLOSED with openTripId', () => {
+		const { h, actor, store } = ctx();
+		try {
+			addItem(h.db, store.id, { name: 'Milk', clientId: randomUUID() }, actor);
+			const closedId = store.openTripId;
+			const successor = closeTrip(h.db, store.id, { tripId: closedId }, actor).newTrip.id;
+
+			for (const tripId of [closedId, createStore(h.db, { name: 'BIM' }, actor).openTripId]) {
+				try {
+					closeTrip(h.db, store.id, { tripId }, actor);
+					throw new Error('expected a rejection');
+				} catch (err: any) {
+					expect(isDomainError(err)).toBe(true);
+					expect(err.code).toBe('TRIP_ALREADY_CLOSED');
+					expect(err.status).toBe(409);
+					expect(err.extra.openTripId).toBe(successor);
+				}
 			}
 		} finally {
 			h.close();

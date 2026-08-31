@@ -15,7 +15,14 @@ import {
 	toStoreSummary,
 	type StoreSummaryRow
 } from './rows.js';
-import { STORE_COLORS, storeColor, storeName, storeNameKey, boolean, integer } from './validate.js';
+import {
+	STORE_COLORS,
+	storeColor,
+	storeName,
+	storeNameKey,
+	boolean,
+	sortOrder as validateSortOrder
+} from './validate.js';
 import type { StoreColor, StoreSummary } from '$lib/types';
 
 export interface Actor {
@@ -134,7 +141,9 @@ export function updateStore(db: Db, storeId: string, patch: StorePatch): StoreSu
 	const name = has('name') ? storeName(patch.name) : null;
 	const nameKey = name === null ? null : storeNameKey(name);
 	const color = has('color') ? storeColor(patch.color) : null;
-	const sortOrder = has('sortOrder') ? integer(patch.sortOrder, 'sortOrder') : null;
+	// §3.1b: `sortOrder` is the one client-supplied integer written directly
+	// (R-15), so it is bounded as well as safe-integer checked.
+	const sortOrder = has('sortOrder') ? validateSortOrder(patch.sortOrder) : null;
 	const archived = has('archived') ? boolean(patch.archived, 'archived') : null;
 
 	const rev = tx(db, () => {

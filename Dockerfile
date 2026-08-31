@@ -28,6 +28,9 @@
 
 FROM node:26-alpine AS build
 WORKDIR /app
+# @playwright/test is a dev dependency and its install script would otherwise
+# pull ~400 MB of browsers into a layer that exists only to run `vite build`.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .

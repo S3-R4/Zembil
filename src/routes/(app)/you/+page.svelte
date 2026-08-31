@@ -83,6 +83,11 @@
 			} else if (err instanceof Error && err.name === 'InvalidStateError') {
 				error = 'This device already has a passkey for your account.';
 			} else {
+				// A SecurityError here almost always means ZEMBIL_RP_ID does not match
+				// the host the browser is on — a deployment mistake, not a member's.
+				// The name goes to the console because the member cannot act on it and
+				// the operator can.
+				console.error('[zembil] passkey registration failed', err);
 				error = messageOf(err);
 			}
 		} finally {

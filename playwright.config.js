@@ -1,7 +1,11 @@
 import { defineConfig } from '@playwright/test';
 
 const PORT = 4173;
-export const BASE_URL = `http://127.0.0.1:${PORT}`;
+// `localhost`, not `127.0.0.1`: WebAuthn requires the relying-party ID to be a
+// domain, and an IP literal is rejected by the browser with a SecurityError
+// before any request is made. `localhost` is also a secure context by rule, so
+// the passkey specs run without TLS.
+export const BASE_URL = `http://localhost:${PORT}`;
 /** The password compose would print once on a first boot; pinned here so the
  *  setup project can sign in. */
 export const BOOTSTRAP_PASSWORD = 'e2e-bootstrap-password';
@@ -28,6 +32,10 @@ export default defineConfig({
 		{
 			name: 'phone',
 			dependencies: ['setup'],
+			// The passkey spec signs out, which destroys the session token stored in
+			// admin.json server-side — so it runs last, in its own project, and
+			// nothing depends on the state it leaves.
+			testIgnore: /passkey\.spec\.js/,
 			use: {
 				// The brief's target: one-handed on a 390px phone. Every assertion
 				// about reach and tap size is meaningless at any other size.
@@ -37,6 +45,19 @@ export default defineConfig({
 				// a suite that cannot run is worth less than one that runs on the
 				// wrong engine. The viewport, touch and mobile flags are what the
 				// layout assertions actually depend on.
+				browserName: 'chromium',
+				viewport: { width: 390, height: 844 },
+				deviceScaleFactor: 3,
+				isMobile: true,
+				hasTouch: true,
+				storageState: 'tests/e2e/.auth/admin.json'
+			}
+		},
+		{
+			name: 'passkey',
+			dependencies: ['phone'],
+			testMatch: /passkey\.spec\.js/,
+			use: {
 				browserName: 'chromium',
 				viewport: { width: 390, height: 844 },
 				deviceScaleFactor: 3,

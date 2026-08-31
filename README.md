@@ -239,11 +239,17 @@ as SHA-256 hashes, so nothing needs signing.
 npm install
 ZEMBIL_ORIGIN=http://localhost:5173 ZEMBIL_DATA_DIR=./data npm run dev
 npm test          # vitest, against real SQLite files
+npm run test:e2e  # playwright at 390×844, against the production build
 npm run check     # svelte-check
 ```
 
 Over `http://` the session cookie drops the `__Host-` prefix and the `Secure` attribute so local
 development works; passkeys still work on `localhost`, which browsers treat as a secure context.
+Use `localhost`, not `127.0.0.1` — WebAuthn requires the relying-party ID to be a domain name and
+rejects an IP literal before any request leaves the browser.
+
+`npm run test:e2e` builds nothing for you: run `npm run build` first. It starts the real production
+server against a throwaway database in `.playwright-data/`, which it wipes on every run.
 
 | Document | What it is |
 |---|---|

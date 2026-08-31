@@ -380,9 +380,20 @@ model is "I added this to Migros", not "I added this to Migros trip #7".
 
 **Consequence.** The partial predicate is what keeps the chain legal — a carried original and its
 live clone share a `client_id` but only one of them is inside the index. That makes statement order
-in close load-bearing rather than stylistic, which is why the contract now spells it out and a test
-asserts the constraint fires on the wrong order. A retry that crosses a close returns `200` with an
-item on a **later** trip than the caller asked about; the client must accept that.
+in close load-bearing rather than stylistic. A retry that crosses a close returns `200` with an item
+on a **later** trip than the caller asked about; the client must accept that.
+
+**Correction (M0 audit round 2).** This decision originally claimed the two-statement
+update-then-insert order was "verified against `node:sqlite` on this build". It was not. What I had
+actually verified was the index behaviour on a stripped-down table with no foreign key, and I
+carried the conclusion across to a schema where `carried_to_item_id` is a self-referencing FK that
+SQLite checks immediately. Run against the real §1.1 DDL with `foreign_keys=ON`, that order fails
+with `FOREIGN KEY constraint failed`, and the reverse order fails on `items_client_id` — so as
+written, the very first close of any store with a pending item would have returned `500` and
+carry-over, the brief's headline feature, would never have worked once. The reviewer caught it by
+executing the DDL. The fix is the three-statement sequence now in R-6 step 5, and I have reproduced
+both failures and the fix. See D-024 for the shape of the mistake, which is the more useful lesson
+than the SQL.
 
 ---
 
@@ -461,3 +472,100 @@ through a different door.
 credential-stuffing control — the knob to tighten if abuse ever appears. `PROTOCOL_HEADER` and
 `HOST_HEADER` must stay unset (§6) so that nothing a client sends can influence what the app believes
 its own origin is.
+
+---
+
+## D-024 — Carry-over commits in three statements, and FKs stay immediate
+
+**Decision.** R-6 step 5 inserts the clone with `client_id = NULL`, marks the original `carried`, then
+writes the clone's `client_id` — three statements, inside the existing `BEGIN IMMEDIATE`. The
+`carried_to_item_id` foreign key is **not** made `DEFERRABLE INITIALLY DEFERRED`.
+
+**Rationale.** Two constraints pull in opposite directions and neither two-statement order satisfies
+both. `carried_to_item_id` is a self-reference and SQLite checks foreign keys immediately, so marking
+the original `carried` first points at a clone that does not exist yet. Inserting the clone first puts
+two rows carrying the same `client_id` inside `items_client_id`'s partial predicate at once. Measured,
+not reasoned:
+
+| Sequence | Result |
+|---|---|
+| update original, then insert clone | `FOREIGN KEY constraint failed` |
+| insert clone, then update original | `UNIQUE constraint failed: items.store_id, items.client_id` |
+| insert with `client_id=NULL`, update original, set clone's `client_id` | commits |
+
+Deferring the FK would also work and would save one `UPDATE`. It is the wrong trade: `DEFERRABLE
+INITIALLY DEFERRED` suspends that check for **every** transaction in the application, forever, to buy
+one statement on a path that runs once per shopping trip. The three-statement form is local to close,
+costs nothing at family scale, and leaves the constraint doing its job everywhere else.
+
+**Consequence.** Close is the one place in the codebase where statement order is load-bearing, so a
+test asserts that *both* wrong orders raise `SQLITE_CONSTRAINT`. Without that test the sequence would
+appear to "start working" the day someone drops a constraint for an unrelated reason.
+
+---
+
+## D-025 — Cross-agent seams are named in the contract, not left to convention
+
+**Decision.** Three interfaces move into the frozen contract: `App.Locals` (§7), the
+`src/lib/server/realtime/bus.ts` export surface (§4.1), and file ownership for the build skeleton
+(`PLAN.md` §4, assigned to the orchestrator). `src/app.d.ts` goes to `zembil-auth`.
+
+**Rationale.** Three separate findings in the second audit round had one shape: an interface between
+two agents that the contract described in prose but never named. The contract said the actor is
+"attached to the request by `hooks.server.ts`" without saying under what property — so the auth agent
+writes `locals.session.user` and the data agent reads `locals.user.id`, both suites pass, and every
+write route throws `TypeError` at integration. It required auth-owned admin endpoints to terminate a
+user's SSE streams while forbidding that agent from touching the realtime module and never defining
+the function to call — so "disabling an account means *now*", the entire rationale for choosing
+server-side sessions over JWTs in D-004, would have shipped unimplemented. And nobody owned
+`svelte.config.js`, which carries a CSP that D-026 shows is load-bearing.
+
+The general rule this makes explicit: **whenever two agents that never see each other's code must
+agree on something, the agreement goes in the contract — including the ones that feel too small to
+write down.** D-021 already applied this to the SSE wire format and it was not enough, because
+pinning the bytes on the wire is worthless if the two sides disagree about the function that emits
+them.
+
+**Consequence.** The contract now contains TypeScript that is not a data shape but an API surface.
+That is a widening of what "contract" means here, and it is the right one.
+
+---
+
+## D-026 — CSP comes from `kit.csp`, and `hooks.server.ts` must not set it
+
+**Decision.** `svelte.config.js` owns `Content-Security-Policy` via `kit.csp` hash mode.
+`hooks.server.ts` sets the other security headers and never CSP. `style-src` carries
+`'unsafe-inline'`; `script-src` never does.
+
+**Rationale.** §5 previously required a static CSP header set in hooks *and* `kit.csp` hash mode. Both
+cannot hold. SvelteKit emits an inline hydration script and injects its `'sha256-…'` into the CSP it
+generates; a static header either replaces that one or is sent alongside it, and a browser enforces
+the intersection of multiple CSP headers — the hash is lost either way. The result is an app that
+renders and never hydrates, **in the production build only**, which is the failure mode most likely to
+survive every dev-mode check and reach the server. The `style-src` asymmetry is a separate, smaller
+judgement: one `style="transform: translateX(…)"` on a swipe-to-tick row is enough to break a strict
+`style-src`, and on a same-origin app with no user-supplied HTML the injection risk from inline styles
+is not comparable to that from inline scripts.
+
+**Consequence.** `Cache-Control: no-store` on every authenticated response joins the header set at the
+same time — a shopping list carrying family members' names must not land in an intermediary cache, and
+a header does not depend on the frontend agent remembering the service worker rule.
+
+---
+
+## D-027 — `must_change_password` is enforced by the server
+
+**Decision.** While the flag is set, every endpoint except `GET /api/me`, `POST /api/auth/password`
+and `POST /api/auth/logout` returns `403 PASSWORD_CHANGE_REQUIRED`. `mustChangePassword` joins the
+`User` type.
+
+**Rationale.** The flag was written by admin-create and reset-password, returned once by login, and
+enforced by nothing. The realistic sequence: an admin creates an account, sends the generated
+20-character password over WhatsApp, the member logs in, dismisses the change prompt, reloads — the
+flag is gone from client state and the temporary password stays valid for the full 180-day absolute
+session TTL, known to the admin and to anyone who read that chat. A prompt the client can dismiss is
+not a control.
+
+**Consequence.** The frontend must handle `403 PASSWORD_CHANGE_REQUIRED` as a redirect to the change
+screen rather than as an error, on any request. Putting the flag on `User` means a reload cannot lose
+it.

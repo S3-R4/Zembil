@@ -46,8 +46,8 @@ CREATE TABLE users (
   created_at           INTEGER NOT NULL,
   updated_at           INTEGER NOT NULL,
   disabled_at          INTEGER,                   -- set when is_active flips to 0
-  CHECK (length(trim(username)) > 0),
-  CHECK (length(trim(display_name)) > 0),
+  CHECK (length(trim(username)) > 0     AND length(username) <= 32),
+  CHECK (length(trim(display_name)) > 0 AND length(display_name) <= 60),
   CHECK (length(webauthn_user_handle) = 32),
   CHECK ((is_active = 0) = (disabled_at IS NOT NULL))
 ) STRICT;
@@ -65,7 +65,10 @@ CREATE TABLE sessions (
   last_seen_at        INTEGER NOT NULL,
   idle_expires_at     INTEGER NOT NULL,           -- slid forward on use
   absolute_expires_at INTEGER NOT NULL,           -- never extended
-  user_agent          TEXT,                       -- truncated to 256 chars, for the account screen
+  user_agent          TEXT,                       -- truncated to 256 chars. Written but not read in
+                                                  -- the MVP: the session list that would show it is in
+                                                  -- BACKLOG.md. Kept because it costs nothing now and
+                                                  -- cannot be backfilled for sessions already created.
   CHECK (absolute_expires_at > created_at)
 ) STRICT;
 CREATE INDEX sessions_user      ON sessions (user_id);
@@ -84,7 +87,7 @@ CREATE TABLE credentials (
   backed_up     INTEGER NOT NULL DEFAULT 0 CHECK (backed_up IN (0,1)),
   created_at    INTEGER NOT NULL,
   last_used_at  INTEGER,
-  CHECK (length(trim(device_label)) > 0)
+  CHECK (length(trim(device_label)) > 0 AND length(device_label) <= 64)
 ) STRICT;
 CREATE INDEX credentials_user ON credentials (user_id);
 
@@ -125,7 +128,7 @@ CREATE TABLE stores (
   created_at  INTEGER NOT NULL,
   created_by  TEXT    REFERENCES users(id) ON DELETE SET NULL,
   archived_at INTEGER,
-  CHECK (length(trim(name)) > 0)
+  CHECK (length(trim(name)) > 0 AND length(name) <= 60)
 ) STRICT;
 CREATE INDEX stores_listing ON stores (archived_at, sort_order, name);
 
@@ -206,13 +209,15 @@ CREATE TABLE items (
   CHECK (note IS NULL OR length(note) <= 500),
   CHECK (carry_count >= 0),
   CHECK (version >= 1),
-  -- ticked_at is set if and only if the item is ticked
+  -- ticked_at and ticked_by are set if and only if the item is ticked
   CHECK ((state = 'ticked') = (ticked_at IS NOT NULL)),
+  CHECK ((state = 'ticked') = (ticked_by IS NOT NULL)),
   -- a carried item must point at its clone; a non-carried item must not
   CHECK ((state = 'carried') = (carried_to_item_id IS NOT NULL))
 ) STRICT;
 CREATE UNIQUE INDEX items_client_id   ON items (store_id, client_id)
        WHERE client_id IS NOT NULL AND state <> 'carried' AND deleted_at IS NULL;
+CREATE UNIQUE INDEX items_trip_order  ON items (trip_id, sort_order) WHERE deleted_at IS NULL;
 CREATE INDEX items_list               ON items (trip_id, state, sort_order) WHERE deleted_at IS NULL;
 CREATE INDEX items_store_history      ON items (store_id, created_at);
 CREATE INDEX items_origin             ON items (origin_item_id);
@@ -272,6 +277,18 @@ Each of these is a testable assertion. The reviewer checks that a test exists fo
 | I-12 | Within one trip, `sort_order` is unique across non-deleted items. Allocation is `MAX+1000` per R-15, and nothing else writes it. |
 | I-13 | `stores.rev` is strictly increasing per store and is bumped by exactly the writes listed in §3.0. |
 
+**Which of these the schema enforces, and which only tests do.** The distinction is normative — an
+invariant nobody enforces is a comment.
+
+| Bound by the schema | I-1 (`trips_one_open_per_store`), I-4 (two `CHECK`s), I-5 partially (the `carried`/`carried_to_item_id` `CHECK`), I-10 (`NOT NULL`), I-11 (`items_client_id`), I-12 (`items_trip_order`) |
+| Bound only by tests | I-2, I-3, I-5 (the "closed trip" half), I-6, I-7, I-8, I-9, I-13 |
+
+I-3 (`items.store_id` matches its trip's store) is deliberately test-bound rather than trigger-bound:
+a trigger would fire on every insert on the hot path to catch a bug that a single application-level
+helper — one function that resolves the open trip and returns both ids together — makes unwritable.
+The M1 exit criterion is that each test-bound invariant has a test that fails when the invariant is
+violated, not merely one that passes today.
+
 ### 1.3 Password hash encoding
 
 `password_hash` is a single text column holding all parameters, so the algorithm can be upgraded
@@ -326,25 +343,42 @@ inside `BEGIN IMMEDIATE … COMMIT`, in this order:
 5. For each non-deleted item in the closed trip with `state='pending'`, ordered by
    `sort_order, created_at, id`, and **in this statement order**:
    - generate the clone's `id` in application code first;
-   - update the original to `state='carried'`, `carried_to_item_id = <clone id>`, bump `version`;
-   - **then** insert the clone into the successor trip with the same `name`, `note`, `sort_order`,
-     `client_id` and `created_by` (the original author is preserved — carry-over is not
-     authorship), `state='pending'`, `carried_from_item_id = original.id`,
+   - **insert** the clone into the successor trip with the same `name`, `note`, `sort_order` and
+     `created_by` (the original author is preserved — carry-over is not authorship), but
+     **`client_id = NULL` for now**, `state='pending'`, `carried_from_item_id = original.id`,
      `origin_item_id = original.origin_item_id`, `carry_count = original.carry_count + 1`,
-     `version=1`, `created_at=now`, `updated_at=now`.
+     `version=1`, `created_at=now`, `updated_at=now`;
+   - **update** the original to `state='carried'`, `carried_to_item_id = <clone id>`, bump `version`;
+   - **update** the clone to `client_id = original.client_id`.
 
-   The order is not stylistic. `client_id` is **carried, not nulled** — see I-11 and R-17 — so the
-   original must leave the index's partial predicate (by becoming `carried`) before the clone
-   enters it. Inserting first raises `SQLITE_CONSTRAINT` on `items_client_id`. Verified against
-   `node:sqlite` on this build.
+   The order is not stylistic and it is **three statements, not two**. `client_id` is carried, not
+   nulled (I-11, R-17), so the original must leave the `items_client_id` partial predicate before the
+   clone enters it — but `carried_to_item_id` is a self-referencing foreign key, SQLite checks
+   foreign keys **immediately** unless they are declared deferred, and this one is not. So neither
+   two-statement order works. Measured on Node 26.1.0 / SQLite 3.53.0 against the §1.1 DDL with
+   `foreign_keys=ON`:
+
+   | Sequence | Result |
+   |---|---|
+   | update original to `carried` first, then insert clone | `FOREIGN KEY constraint failed` — the clone does not exist yet |
+   | insert clone first, then update original | `UNIQUE constraint failed: items.store_id, items.client_id` |
+   | insert clone with `client_id=NULL`, update original, then set the clone's `client_id` | **commits** |
+
+   The three-statement form is the one to implement. It is preferred over declaring the FK
+   `DEFERRABLE INITIALLY DEFERRED` because deferring it would suspend that check for every
+   transaction in the application to buy one saved `UPDATE` on a path that runs once per shopping
+   trip. A test asserts that both two-statement orders raise `SQLITE_CONSTRAINT`, so this cannot
+   quietly regress into a scheme that happens to work only because a constraint was dropped.
 6. Bump `stores.rev`.
 7. `COMMIT`, then emit one `store.changed` event carrying the new `rev`.
 
 **R-7 — Ticked items never carry.** An item with `state='ticked'` when its trip closes stays exactly
 as it is, in the closed trip, forever. That is the purchase history.
 
-**R-8 — Closed trips are immutable.** Tick, untick, edit, delete and add against an item or trip whose
-trip is closed all return `409 TRIP_CLOSED`. The only writes a closed trip ever receives are those in
+**R-8 — Closed trips are immutable.** Tick, untick, edit and delete against an item whose trip is
+closed all return `409 TRIP_CLOSED`. There is deliberately no such case for **add**: R-2 makes add
+store-scoped, so it resolves the store's currently-open trip and can never target a closed one. Do
+not write a test for adding to a closed trip; the endpoint to reach it does not exist. The only writes a closed trip ever receives are those in
 R-6 step 5.
 
 **R-9 — Undo after rollover.** Undo is scoped to the open trip. A user who ticked an item and then
@@ -365,8 +399,9 @@ loses the item.
 **R-13 — Ordering within a list.** Pending items sort by `sort_order ASC, created_at ASC, id ASC`.
 The `id` tiebreak is mandatory: without a total order, two rows sharing a key render in whatever
 order SQLite happens to return and the list visibly reshuffles between refetches. Ticked
-items sort **below all pending items**, by `ticked_at DESC` — most recently ticked at the top of the
-ticked group, so undo is always reachable near the boundary. `carried` items never appear in an open
+items sort **below all pending items**, by `ticked_at DESC, id ASC` — most recently ticked at the top
+of the ticked group, so undo is always reachable near the boundary. The `id` tiebreak is there for the
+same reason as above: two items ticked in the same millisecond must not reshuffle between refetches. `carried` items never appear in an open
 list.
 
 **R-14 — Archiving a store.** Sets `archived_at`. The open trip is left open and untouched. An
@@ -455,16 +490,42 @@ nothing beyond it.
 
 ### 3.1 Error envelope
 
-Every non-2xx response is exactly:
+Every non-2xx response carries an `error` object of exactly this shape:
 
 ```json
 { "error": { "code": "ITEM_NOT_FOUND", "message": "Item not found." } }
 ```
 
+Two responses add a **named sibling field** next to `error`, and only these two: `409
+VERSION_CONFLICT` adds `item: Item`, and `409 TRIP_ALREADY_CLOSED` adds `openTripId: string`. Both
+exist so the client can recover without a second round trip, and both are typed in §7. No other
+error response adds anything, and no error response ever nests recovery data *inside* `error`.
+
 `message` is safe to show a user and never leaks internals. Diagnostic detail goes to the server log
 only. Shared codes: `UNAUTHENTICATED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404),
 `ORIGIN_MISMATCH` (403), `VALIDATION_FAILED` (400), `RATE_LIMITED` (429), `CONFLICT` (409),
-`INTERNAL` (500).
+`PASSWORD_CHANGE_REQUIRED` (403), `INTERNAL` (500).
+
+### 3.1a String input validation
+
+Normative for every string field in every request body. Applied **before** any database write, so a
+`CHECK` constraint is never the thing that rejects user input — a constraint violation surfacing to a
+user is a `500`, and a `500` on a 250-character paste into the add sheet is a defect, not validation.
+
+| Field | Endpoint | Rule |
+|---|---|---|
+| item `name` | `POST /items`, `PATCH /items/{id}` | trim; 1–200 chars after trimming |
+| item `note` | same | trim; `null` or empty-after-trim is stored as `NULL`; max 500 |
+| store `name` | `POST /stores`, `PATCH /stores/{id}` | trim; 1–60 |
+| passkey `label` | `passkey/register/verify` | trim; 1–64 |
+| `username` | `POST /admin/users` | trim; 1–32; `[a-z0-9._-]+` after lowercasing; `username_key` is the lowercased form |
+| `displayName` | `POST`/`PATCH /admin/users` | trim; 1–60 |
+| `password` / `newPassword` | login, password change | **not** trimmed — leading and trailing spaces are part of the secret; 12–256 |
+| `clientId` | `POST /items` | must parse as a UUID; rejected otherwise |
+
+Trim means Unicode whitespace, and the trimmed value is what is stored. Anything failing a rule is
+`400 VALIDATION_FAILED`. The DDL's length `CHECK`s are set at the same numbers and exist as the
+backstop that catches a route that forgot to validate, in tests rather than in production.
 
 ### 3.2 Authentication
 
@@ -517,6 +578,23 @@ sequential integer. `excludeCredentials` lists the user's existing credentials.
 Request `{ "challengeId": string, "response": RegistrationResponseJSON, "label": string }`.
 `201` → `{ "passkey": Passkey }`. `label` is 1–64 characters.
 
+**`GET /api/me`** → `{ "user": User, "passkeys": Passkey[] }`. `passkeys` is the caller's own,
+ordered `created_at ASC`. Never another user's, at any privilege level.
+
+**A successful assertion writes back.** In the same transaction that creates the session,
+`passkey/login/verify` updates the credential's `counter` to the value the authenticator returned and
+sets `last_used_at = now`. Without the counter write the clone check in the paragraph above compares
+every future assertion against a permanently-zero stored value and can never fire, and
+`Passkey.lastUsedAt` — which the account screen renders as "Used 2 minutes ago" — stays null forever.
+
+**`must_change_password` is enforced server-side, not by the client.** While the flag is set, every
+endpoint returns `403 PASSWORD_CHANGE_REQUIRED` **except** `GET /api/me`, `POST /api/auth/password`
+and `POST /api/auth/logout`. The flag is cleared by a successful password change. It is surfaced on
+`User.mustChangePassword` so a reload does not lose it — login's `mustChangePassword` field is a
+convenience, not the only carrier. Without this the temporary password an admin hands out over a chat
+app stays valid for the full 180-day absolute session TTL as soon as the member dismisses the prompt
+once, which is the whole reason the flag exists.
+
 ### 3.3 Admin
 
 | Method | Path | Auth | Purpose |
@@ -533,8 +611,11 @@ characters, unambiguous alphabet), returns it **once**, never stores it in plain
 `must_change_password=1`. `409 USERNAME_TAKEN` if `username_key` collides.
 
 **`PATCH /api/admin/users/{userId}`** — request `{ "displayName"?, "isAdmin"?, "isActive"? }`.
-Setting `isActive:false` sets `disabled_at` and **destroys every session and terminates every open SSE
-stream for that user immediately**. Guards, each `409`:
+Setting `isActive:false` sets `is_active=0, disabled_at=now` and **destroys every session and
+terminates every open SSE stream for that user immediately**. Setting `isActive:true` sets
+`is_active=1, disabled_at=NULL` **in the same statement** — the `CHECK ((is_active = 0) = (disabled_at
+IS NOT NULL))` constraint means writing `is_active=1` alone aborts, so the admin screen's Enable
+button would return `500`. Guards, each `409`:
 `CANNOT_DISABLE_SELF`, `CANNOT_DEMOTE_SELF`, and `LAST_ADMIN` — the system must never reach zero
 active admins.
 
@@ -549,7 +630,14 @@ active admins.
 | POST | `/api/stores` | session | Create a store (+ its first trip) |
 | PATCH | `/api/stores/{storeId}` | session | Rename, reorder, archive, un-archive |
 
-`GET /api/stores` → `{ "stores": StoreSummary[] }` where
+`GET /api/stores?includeArchived=true` → `{ "stores": StoreSummary[] }`. The parameter defaults to
+`false`, which is the home screen. `true` additionally returns archived stores, each with
+`archivedAt` set, and is how un-archiving is reachable at all — R-14 promises it and there is no
+other endpoint that yields an archived store's id. `409 STORE_NAME_TAKEN` also returns the colliding
+store's id (`{ "error": {...}, "storeId": string }`) so a name clash against something archived leads
+straight to the un-archive action rather than a dead end.
+
+Response shape:
 
 ```ts
 type StoreSummary = {
@@ -558,11 +646,14 @@ type StoreSummary = {
   pendingCount: number;      // drives "Nothing needed" vs a count in the design
   tickedCount: number;
   lastClosedTripAt: number | null;
+  archivedAt: number | null;
 }
 ```
 
-`POST /api/stores` request `{ "name": string, "color"?: StoreColor }` (name 1–60 chars; `color`
-defaults to the first palette key not already used by an active store). `201 → { "store": StoreSummary }`.
+`POST /api/stores` request `{ "name": string, "color"?: StoreColor }` (name 1–60 chars per §3.1a; `color`
+defaults to the first palette key not already used by an active store, or — once all eight are in
+use — to the key at index `(count of active stores) % 8`, so store nine gets a colour rather than a
+`NOT NULL` violation and a `500`). `201 → { "store": StoreSummary }`.
 `PATCH /api/stores/{storeId}` accepts `{ "name"?, "color"?, "sortOrder"?, "archived"? }`. An
 unrecognised `color` is `400 VALIDATION_FAILED` — the value reaches a CSS class name, so it is
 validated against the enum server-side and never interpolated.
@@ -593,7 +684,16 @@ expected) instead of `201`. `201 → { "item": Item }`. The client generates one
 reuses it across every retry of that compose, and generates a fresh one only for a new item.
 `409 STORE_ARCHIVED` if archived. `sort_order` is assigned per R-15.
 
-**`POST /api/items/{itemId}/tick`** and **`/untick`** — request body `{}`. `200 → { "item": Item }`.
+**Every item-mutating response carries `rev`.** `POST /items`, `PATCH /items/{id}`,
+`DELETE /items/{id}`, `tick` and `untick` all return `{ "item": Item, "rev": number }` (delete returns
+`{ "item": Item, "rev": number }` with the soft-deleted item), where `rev` is the store's `rev`
+**after** the write — the same value the `store.changed` event will carry. Without it a phone's
+`known.rev` is stale by exactly one after its own write, its own echoed event always satisfies
+`event.rev > known.rev`, and every add and every tick costs a pointless second full list fetch. The
+whole point of the §4 cursor is to suppress the self-echo, and it cannot without this field. On an
+idempotent no-op (R-4, R-5, R-10, R-17) `rev` is the store's current unchanged value.
+
+**`POST /api/items/{itemId}/tick`** and **`/untick`** — request body `{}`.
 Idempotent per R-4 and R-5. `409 TRIP_CLOSED` if the item's trip is closed. `404 ITEM_NOT_FOUND`
 if the item does not exist **or** is soft-deleted.
 
@@ -613,6 +713,11 @@ take a version — a concurrent tick is not a conflict, it is agreement.
 | GET | `/api/stores/{storeId}/trips` | session | Closed trips, newest first |
 | GET | `/api/trips/{tripId}` | session | One trip with its items |
 
+`GET /api/trips/{tripId}` → `{ "trip": TripSummary, "items": Item[] }`. Items are ordered
+`state ASC, sort_order ASC, id ASC` and **include `carried` items** — the history screen's "left on
+the list" count is meaningless without them, and R-13's exclusion of `carried` applies to the open
+list only. Soft-deleted items are excluded per I-8. Works for open and closed trips alike.
+
 `GET /api/stores/{storeId}/trips?limit=20&before={seq}` →
 `{ "trips": TripSummary[], "nextBefore": number | null }` where `TripSummary` adds `boughtCount` and
 `carriedCount` to `Trip`. `limit` is 1–50, default 20.
@@ -626,6 +731,7 @@ In-process token buckets, keyed independently and both checked:
 | Password login | `username_key` | 10 per 15 min |
 | Password login | client IP | 300 per 15 min |
 | Passkey assertion | client IP | 300 per 15 min |
+| Passkey **options** (`login/options` + `register/options`) | client IP | 300 per 15 min |
 | Admin user creation | actor `user_id` | 20 per hour |
 
 The per-IP limits are deliberately loose. **The whole family shares one home WAN IP**, and behind the
@@ -640,10 +746,34 @@ account lockout**: a lockout on a family app is a denial-of-service any anonymou
 on a family member. Buckets are in-memory and reset on restart, which is acceptable because the
 restart requires host access.
 
-**Client IP is derived only from the `ZEMBIL_TRUST_PROXY` setting** — take the Nth-from-the-right
-entry of `X-Forwarded-For`, where N is the configured hop count. Reading the leftmost entry, or
-trusting the header when `ZEMBIL_TRUST_PROXY=0`, lets any client forge its own identity and is a
-defect.
+`passkey/login/options` is public and **writes a `webauthn_challenges` row**, so without its own
+bucket an internet scanner can POST `{}` in a loop and grow the database until `/data` is full and
+every write in the app fails. The bucket is the brake; the reaper below is the cleanup.
+
+**Expiry reaping.** Two tables accumulate rows that nothing else deletes. A single timer started at
+boot runs every 10 minutes and deletes `webauthn_challenges` past `expires_at` and `sessions` past
+either `idle_expires_at` or `absolute_expires_at`; both `options` endpoints also reap expired
+challenges opportunistically before inserting. An expired row is never accepted by a verify call
+regardless of whether the reaper has run yet — expiry is checked on read, and the reaper exists to
+bound disk, not to enforce security.
+
+**Client IP is derived only from the `ZEMBIL_TRUST_PROXY` setting.** Let `N = ZEMBIL_TRUST_PROXY` and
+let `parts` be `X-Forwarded-For` split on commas and trimmed. The client IP is
+`parts[parts.length - N]` — for `N = 1` that is the **last** entry, the address the single trusted
+proxy actually observed the connection from. Worked example, which is normative:
+
+| `X-Forwarded-For` | `ZEMBIL_TRUST_PROXY` | Client IP |
+|---|---|---|
+| `1.2.3.4, 203.0.113.9` | `1` | `203.0.113.9` |
+| `1.2.3.4, 203.0.113.9` | `0` | the socket peer address — the header is ignored entirely |
+| `203.0.113.9` | `2` | the socket peer address — fewer entries than trusted hops |
+| absent | `1` | the socket peer address |
+
+Everything to the left of the trusted hops is client-supplied and must never be read. An off-by-one
+here — `parts[parts.length - 1 - N]` is the natural-looking transcription and is **wrong** — hands
+every visitor control of their own rate-limit identity, which is the defect D-007 exists to avoid.
+Falling back to `undefined` or to `parts[0]` when the header is short or missing is equally a defect;
+the fallback is always the socket address.
 
 ---
 
@@ -690,8 +820,51 @@ does a full fetch on mount regardless.
   a client can refetch and read pre-commit state.
 - The stream is torn down immediately when the session is destroyed or the account is disabled. A
   live SSE connection must never outlive its session.
+- **The client revalidates on the `EventSource` `open` event**, not only on mount. `EventSource`
+  reconnects by itself, and a reverse proxy that drops an idle stream at 60 seconds produces a
+  reconnect with no `mount`, no `visibilitychange`, no `focus` and no `online` — the network never
+  went down. A tablet left face-up on the kitchen counter would otherwise miss every change made
+  during the gap, indefinitely. Revalidating on `open` covers reconnects by construction, and it also
+  covers the first connect, so no separate mount-fetch rule is needed.
 - Belt and braces: the client also revalidates on `visibilitychange`, `focus`, and `online`. A phone
   that was in a pocket for an hour resolves on unlock even if the stream silently died.
+- **At most 4 concurrent streams per session**, oldest closed first when a fifth opens. One process,
+  one event loop: without a cap, a single authenticated account — and every account here is a family
+  member's, which is exactly the stated threat model for an app on the public internet — can open
+  connections until the process runs out of file descriptors and the app stops serving everyone.
+
+---
+
+### 4.1 The in-process bus — module surface
+
+`src/lib/server/realtime/bus.ts` is owned by **zembil-data** and **imported** by zembil-auth. The
+export surface below is part of the frozen contract for exactly the same reason the wire format is:
+pinning the bytes on the wire is worthless if the two agents disagree about the function that puts
+them there, and these two agents never see each other's files.
+
+```ts
+/** Fan out to every stream. Call AFTER the write transaction commits. */
+export function emitStoreChanged(storeId: string, rev: number): void;
+export function emitStoresChanged(): void;
+
+/** Auth-owned flows call these. Each sends `session.revoked` to the matching
+ *  streams and then closes them. Both are no-ops when nothing matches. */
+export function revokeSession(sessionId: string): void;
+export function revokeUserStreams(userId: string): void;
+
+/** Registration, called by the GET /api/events route only. Returns an
+ *  unsubscribe function the route calls on client disconnect. */
+export function subscribe(
+  userId: string,
+  sessionId: string,
+  send: (event: ZembilEvent) => void
+): () => void;
+```
+
+`revokeSession` is called on logout and on password change (which destroys the user's other
+sessions); `revokeUserStreams` is called when an admin disables an account or resets its password.
+Without these two, "disabling an account means *now*" — the entire reason D-004 chose server-side
+sessions over JWTs — is silently unimplemented, and a disabled member keeps a live stream.
 
 ---
 
@@ -702,7 +875,7 @@ does a full fetch on mount regardless.
 | Name | `__Host-zembil_session` over HTTPS, `zembil_session` when `ZEMBIL_ORIGIN` is `http://` (dev only) |
 | Value | 32 random bytes from `crypto.randomBytes`, base64url — **the raw token, stored only here** |
 | `HttpOnly` | yes |
-| `Secure` | yes (implied by the `__Host-` prefix) |
+| `Secure` | yes — **written literally**, never left implicit. `__Host-` *requires* the attribute; a browser silently rejects a `__Host-` cookie without it and login fails with no error anywhere |
 | `SameSite` | `Lax` |
 | `Path` | `/` |
 | `Domain` | never set (required by `__Host-`) |
@@ -715,12 +888,41 @@ does a full fetch on mount regardless.
 - The session token is **rotated** (new row, old row deleted) on login and on password change.
 - Session identifiers never appear in a URL, a log line, or the client bundle.
 
-### Security headers (set for every response in `hooks.server.ts`)
+### Security headers
+
+**CSP is produced by `kit.csp` in `svelte.config.js`, and by nothing else.** `hooks.server.ts` sets
+the other four headers and **must not set `Content-Security-Policy`**. SvelteKit emits an inline
+hydration script and injects its own `'sha256-…'` into the CSP it generates; a static header set in
+hooks either replaces that one and loses the hash, or is sent as a second header — and a browser
+enforces the *intersection* of multiple CSP headers, which loses the hash too. Either way
+`script-src 'self'` blocks SvelteKit's own hydration payload, so the app renders, never hydrates, and
+does it **in the production build only**. This is the single easiest way to ship a broken app that
+passes every dev-mode check.
+
+`svelte.config.js` declares:
+
+```js
+csp: {
+  mode: 'hash',
+  directives: {
+    'default-src': ['self'], 'script-src': ['self'], 'style-src': ['self', 'unsafe-inline'],
+    'img-src': ['self', 'data:'], 'font-src': ['self'], 'connect-src': ['self'],
+    'base-uri': ['none'], 'form-action': ['self'], 'frame-ancestors': ['none'],
+    'object-src': ['none']
+  }
+}
+```
+
+`style-src` carries `'unsafe-inline'` and `script-src` does not. That asymmetry is deliberate: a
+single `style="width: 40%"` anywhere in the frontend — and a progress bar or a swipe transform will
+produce one — is blocked by a strict `style-src`, while the injection risk from inline *styles* on a
+same-origin app with no user-supplied HTML is negligible next to the risk from inline scripts. If
+`style-src-attr 'unsafe-inline'` alone proves sufficient once the UI exists, narrow it then;
+`script-src` stays strict either way and `'unsafe-inline'` must never appear there.
+
+Set in `hooks.server.ts` for every response:
 
 ```
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self';
-  img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none';
-  form-action 'self'; frame-ancestors 'none'; object-src 'none'
 Referrer-Policy: same-origin
 X-Content-Type-Options: nosniff
 Cross-Origin-Opener-Policy: same-origin
@@ -728,7 +930,16 @@ Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(),
   publickey-credentials-get=(self), publickey-credentials-create=(self)
 ```
 
-Inline styles and scripts use SvelteKit's `kit.csp` hash mode — `'unsafe-inline'` must not appear.
+And for every response to an **authenticated** request, HTML and JSON alike:
+
+```
+Cache-Control: no-store
+```
+
+Not only the SSE stream. The app ships a service worker, and a shopping list carrying family members'
+names must never be written to a shared or intermediary cache. The service worker's own rule — cache
+the app shell, never an `/api/` response — is stated in `PLAN.md`, but the header is the part that
+does not depend on any agent remembering.
 `Permissions-Policy` must explicitly allow the two `publickey-credentials-*` features or passkeys
 break. HSTS is set by the reverse proxy and documented in the README, not by the app.
 
@@ -780,7 +991,18 @@ These cross the client/server boundary. `src/lib/types.ts` is the single definit
 imports from there and does not redeclare them.
 
 ```ts
-export type UserRole = 'admin' | 'member';
+/**
+ * Set by hooks.server.ts (zembil-auth) and read by every route (zembil-data).
+ * This is the actor seam referenced throughout §2 and §3. It is normative:
+ * `locals.user`, nullable, and `locals.sessionId`, the session row id and never
+ * the raw token. Declared in src/app.d.ts, which zembil-auth owns.
+ */
+declare namespace App {
+  interface Locals {
+    user: User | null;
+    sessionId: string | null;
+  }
+}
 
 export interface User {
   id: string;
@@ -788,6 +1010,7 @@ export interface User {
   displayName: string;
   isAdmin: boolean;
   isActive: boolean;
+  mustChangePassword: boolean;
   createdAt: number;
 }
 
@@ -820,6 +1043,7 @@ export interface StoreSummary {
   pendingCount: number;
   tickedCount: number;
   lastClosedTripAt: number | null;
+  archivedAt: number | null;   // non-null only in the ?includeArchived=true listing
 }
 
 export type TripStatus = 'open' | 'closed';
@@ -860,7 +1084,23 @@ export interface Item {
 export interface ApiError {
   error: { code: string; message: string };
 }
+
+/** The only two error responses with a named sibling field — see §3.1. */
+export interface VersionConflictError extends ApiError { item: Item; }
+export interface TripAlreadyClosedError extends ApiError { openTripId: string; }
+export interface StoreNameTakenError extends ApiError { storeId: string; }
+
+/** Every item-mutating endpoint returns this — see §3.5. `rev` is the store's
+ *  rev AFTER the write, and is what lets a client suppress its own echo. */
+export interface ItemMutation { item: Item; rev: number; }
 ```
+
+A note on `version`: `tick` and `untick` bump `items.version` (R-3, R-5) while `PATCH /api/items/{id}`
+requires a matching `version`. A client that optimistically ticked and then opened the edit sheet from
+its pre-tick state would send a stale `version` and get a spurious `409 VERSION_CONFLICT`. The tick
+and untick responses carry the updated `Item`, so the client must adopt that `version` rather than
+keeping the one it rendered with. This is the intended cost of optimistic tick, not a bug to design
+around.
 
 Note on identifiers: item and trip responses carry **display names**, not user ids. There is no
 endpoint that maps an id to a user for a non-admin, so no id is exposed that a member could use to

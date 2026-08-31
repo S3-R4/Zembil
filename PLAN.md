@@ -75,10 +75,21 @@ construction.
 | Agent | Owns |
 |---|---|
 | `zembil-data` | `src/lib/server/db/**`, `src/lib/server/domain/**`, `src/lib/server/realtime/**`, `src/lib/types.ts`, `src/routes/api/{stores,items,trips,events}/**`, `tests/{db,domain}/**` |
-| `zembil-auth` | `src/lib/server/auth/**`, `src/routes/(auth)/**`, `src/routes/api/{auth,admin}/**`, `src/hooks.server.ts`, `scripts/bootstrap-admin.*`, `tests/auth/**` |
+| `zembil-auth` | `src/lib/server/auth/**`, `src/routes/(auth)/**`, `src/routes/api/{auth,admin}/**`, `src/hooks.server.ts`, `src/app.d.ts`, `scripts/bootstrap-admin.*`, `tests/auth/**` |
 | `zembil-frontend` | `src/routes/(app)/**`, `src/lib/components/**`, `src/lib/client/**`, `src/app.html`, `src/app.css`, `src/service-worker.ts`, `static/**`, `tests/e2e/**` |
 | `zembil-deploy` | `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `.env.example`, `scripts/{backup,restore,entrypoint}.sh`, `README.md` |
 | `zembil-reviewer` | nothing — read-only |
+| **orchestrator** | `package.json`, `svelte.config.js`, `vite.config.js`, `tsconfig.json`, `playwright.config.js`, `.gitignore`, `docs/**`, `PLAN.md`, `.claude/agents/**` |
+
+The build skeleton is deliberately **not** delegated. `svelte.config.js` carries the CSP that
+`CONTRACT.md` §5 makes load-bearing, and `vite.config.js` carries the Vitest pool settings that
+`node:sqlite`'s synchronous single-connection model depends on; both are cross-cutting, both were
+already unowned once, and an unowned file that four agents need is how a milestone ends with three
+conflicting versions of it. An agent that needs a dependency added, or a config changed, **asks the
+orchestrator**. It does not edit these.
+
+`src/app.d.ts` goes to `zembil-auth` because `hooks.server.ts` is what populates `App.Locals`, and
+the declaration must not drift from the thing that writes it. Its shape is pinned in `CONTRACT.md` §7.
 
 `docs/**` and `PLAN.md` are owned by the orchestrator alone. An agent that believes the contract is
 wrong reports it; it does not edit it.
@@ -93,7 +104,9 @@ whose verdict is reported to the user verbatim and acted on before the next mile
 ### M0 — Foundation *(complete)*
 Repo scaffold, agent definitions, `PLAN.md`, `docs/DECISIONS.md`, `docs/CONTRACT.md`,
 `docs/BACKLOG.md`, `docs/DESIGN.md`, design canvas vendored at `design/Zembil.dc.html`.
-**Exit:** contract frozen; DDL verified to execute and every invariant verified to bind. ✅
+**Exit:** contract frozen; DDL verified to execute; every schema-bound invariant (I-1, I-4, I-5,
+I-10, I-11, I-12) verified to actually reject its violation, and every test-bound invariant listed as
+such in `CONTRACT.md` §1.2 rather than assumed. ✅
 
 ### M1 — Data and domain — `zembil-data`
 SvelteKit skeleton that builds and boots. Database connection with pragmas, migration runner,
@@ -101,9 +114,20 @@ migration 001. Domain modules for stores, trips, items, tick, untick and rollove
 bus. The `/api/{stores,items,trips}` routes. Vitest suite.
 **Exit:**
 - `npm run build` succeeds and `node build/index.js` serves.
-- `npm test` green with at least one assertion per rule R-1…R-14.
-- A concurrency test proves two simultaneous closes produce exactly one successor trip.
+- `npm test` green with at least one assertion per rule **R-1…R-17**.
+- A test proves the R-6 step 5 statement order is the only one that works: both two-statement
+  orders must raise `SQLITE_CONSTRAINT` (foreign key, and `items_client_id` respectively). Without
+  this the sequence silently "starts working" the day someone drops a constraint.
+- A test proves `POST /items` with a `clientId` whose original was carried over returns `200` with
+  the **clone on the successor trip**, not a second item (R-17).
+- A concurrency test proves two closes produce exactly one successor trip. §1.1a mandates a single
+  synchronous connection, so two closes cannot interleave in-process and a naive sequential test
+  would still pass with `BEGIN IMMEDIATE` removed. The test therefore opens a **second
+  `DatabaseSync` handle** and asserts both the serialization path and that the loser sees
+  `409 TRIP_ALREADY_CLOSED` with the correct `openTripId`.
 - A test proves an add committing during a close is never lost, in both orderings.
+- A test asserts the §3.0 table: each listed write bumps `rev` and emits exactly the listed events,
+  and each idempotent no-op bumps and emits nothing.
 
 ### M2 — Auth — `zembil-auth`
 scrypt hashing, session lifecycle, `hooks.server.ts` (session resolution, origin check, security

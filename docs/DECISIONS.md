@@ -636,3 +636,32 @@ registration succeeds, the account screen lists the passkey, and the usernameles
 sends an empty `allowCredentials` by design (§3.2) — can never find it. The member ends up with a
 passkey that exists and cannot log them in. `'required'` converts that into a visible refusal at
 registration time.
+
+---
+
+## D-030 — Guards are verified by mutation, not by reading the tests
+
+**Decision.** Every milestone from M2 on carries a mutation sweep as an exit criterion: break each
+guard, run the suite, and treat anything that stays green as a finding. Recorded in `PLAN.md` §6.
+
+**Rationale.** M1 took three audit rounds, and all three found the same failure — not a missing
+guard, but a guard that could not be reached by the test written to protect it:
+
+| round | guard | why the test could not reach it |
+| --- | --- | --- |
+| 1 | `Number.isInteger` on `sortOrder` | the check itself was wrong; the test asserted the 400 and never read the store list back |
+| 2 | `itemVersion` | the test omitted `name`, so `updateItem`'s "nothing to update" guard fired first |
+| 2 | `beforeSeq` | no test of any kind; it is reachable only through a query string |
+| 3 | `readJson`'s body-shape check | route layer — structurally unreachable from any domain-level test |
+| 3 | `handle()`'s generic-message promise | nothing ever forced a non-`DomainError` through a route |
+
+Each of these was correctly written and accurately commented. Reading the code confirmed the guard;
+reading the tests confirmed a test existed that named it. Only mutation showed the two were not
+connected. In round 3 a 40-mutation sweep separated 33 real protections from 7 vacuous ones in a
+single pass, which no amount of re-reading had managed across two prior audits.
+
+**Consequence.** A green suite is evidence about the mutations someone tried, and nothing more. The
+route seam gets its own pass every time: guards reachable only through a query string, a path
+parameter or a raw JSON body are invisible to domain-level tests by construction, and three of the
+five findings above lived exactly there. This is also why the reviewer agent's brief says to attack
+the tests as hard as the code — that instruction came out of round 1 and has paid for itself twice.

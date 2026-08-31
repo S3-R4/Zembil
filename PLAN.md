@@ -174,6 +174,21 @@ Act on every accumulated reviewer finding. Full-suite green. Final end-to-end pa
   so the test exercises the real production artefact.
 - **Not mocked.** The database, the session layer and the rollover transaction are always real. A
   test that mocks them tests the mock.
+- **Mutation sweep — a standing exit criterion for every milestone from M2 on.** Before a milestone
+  is called done, enumerate its guards — every validator, every `throw`, every early return on an
+  idempotent no-op, every CHECK the code leans on as a backstop — then break each one and run the
+  suite. Anything that stays green is a finding, and the milestone is not done.
+
+  This is not belt-and-braces. M1 needed three audits, and each one found the same thing: a guard
+  that was correctly written, accurately commented, and covered by a test that could not reach it.
+  `itemVersion` was unreachable because the test that named it omitted a required sibling field, so
+  an earlier guard fired first. `beforeSeq` and `readJson`'s body-shape check were unreachable
+  because they sit at the route layer, where domain-level tests structurally cannot go. Reading the
+  tests found none of these; mutating the code found all of them in one pass. A green suite is
+  evidence only about the mutations someone tried.
+
+  The route seam deserves its own pass: a guard reachable ONLY through a query string, a path
+  parameter, or a raw JSON body will not be exercised by any domain-level test, however thorough.
 
 ---
 

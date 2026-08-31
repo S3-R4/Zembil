@@ -1,0 +1,36 @@
+# Keeps the build context — and by extension anything an unguarded COPY
+# could pull in — to what `npm ci` and `npm run build` actually need. See
+# Dockerfile and docs/DECISIONS.md D-012.
+
+node_modules
+.svelte-kit
+build
+dist
+
+.git
+.github
+.claude
+
+tests
+playwright-report
+test-results
+coverage
+
+design
+docs
+
+*.log
+.DS_Store
+
+.env
+.env.*
+!.env.example
+
+data
+backups
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+docker-compose.override.yml

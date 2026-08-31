@@ -1,0 +1,105 @@
+services:
+  zembil:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zembil:latest
+    container_name: zembil
+    restart: unless-stopped
+    # Reaps any zombie processes and forwards signals cleanly to PID 1. Not
+    # strictly required — entrypoint.sh already `exec`s node into PID 1 —
+    # but it costs nothing and is cheap insurance.
+    init: true
+
+    # The reverse proxy is the only ingress (CONTRACT.md §3.8, D-012).
+    # Binding to 127.0.0.1 means nothing on the LAN or the public internet
+    # can reach this container directly — only whatever terminates TLS on
+    # THIS host and proxies to it. See README.md for Caddy/nginx/Traefik
+    # configuration, including the SSE buffering setting the realtime
+    # stream needs.
+    ports:
+      - '127.0.0.1:${ZEMBIL_HOST_PORT:-3000}:3000'
+
+    environment:
+      # Required. docker compose refuses to start at all without it, on
+      # purpose — see .env.example.
+      ZEMBIL_ORIGIN: ${ZEMBIL_ORIGIN:?Set ZEMBIL_ORIGIN in .env first (copy .env.example to .env). See README.md.}
+
+      ZEMBIL_RP_ID: ${ZEMBIL_RP_ID:-}
+      ZEMBIL_RP_NAME: ${ZEMBIL_RP_NAME:-Zembil}
+      ZEMBIL_TRUST_PROXY: ${ZEMBIL_TRUST_PROXY:-1}
+      ZEMBIL_BOOTSTRAP_ADMIN_USERNAME: ${ZEMBIL_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD: ${ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD:-}
+      ZEMBIL_SESSION_IDLE_DAYS: ${ZEMBIL_SESSION_IDLE_DAYS:-30}
+      ZEMBIL_SESSION_ABSOLUTE_DAYS: ${ZEMBIL_SESSION_ABSOLUTE_DAYS:-180}
+      ZEMBIL_LOG_LEVEL: ${ZEMBIL_LOG_LEVEL:-info}
+
+      # Fixed by this deployment shape, not operator-tunable — do not move
+      # these into .env.example. ZEMBIL_DATA_DIR must always match the
+      # volume mount point below; PORT and HOST must always match the
+      # healthcheck and the port mapping above.
+      ZEMBIL_DATA_DIR: /data
+      PORT: '3000'
+      HOST: 0.0.0.0
+
+      # adapter-node's own connection-drain timeout (an adapter-node
+      # variable, not one of Zembil's — see build/index.js). Kept
+      # comfortably inside stop_grace_period below so there is slack left
+      # for the app's own SIGTERM handler to close every SSE stream,
+      # checkpoint the WAL, and close the database afterwards (CONTRACT.md
+      # §3.8).
+      SHUTDOWN_TIMEOUT: '20'
+
+      # PROTOCOL_HEADER and HOST_HEADER are deliberately never set here.
+      # CONTRACT.md §6: both are @sveltejs/adapter-node variables that make
+      # the app derive its own origin from client-supplied headers
+      # (X-Forwarded-Proto / X-Forwarded-Host) instead of from the constant
+      # ZEMBIL_ORIGIN above. Setting either would let a client that reaches
+      # this container directly — bypassing the reverse proxy — decide what
+      # the app believes its own origin is, which is an authentication
+      # bypass for the WebAuthn origin check. Do not add them.
+
+    volumes:
+      # The ONLY data this app has (CONTRACT.md §6). Contains zembil.db and,
+      # whenever the database is open, its -wal and -shm sidecars — all
+      # three together, not the .db file alone, are the live database. See
+      # README.md, "Data and backups", for exactly what that means for
+      # backup and restore. Named explicitly so scripts/backup.sh and
+      # scripts/restore.sh can address this volume directly, without
+      # depending on the compose project name (which defaults to the
+      # directory name and is not stable across clones).
+      - zembil_data:/data
+
+    healthcheck:
+      # No curl, no wget — just Node's own global fetch, so this never
+      # depends on a tool the image may not have (see Dockerfile). Mirrors
+      # GET /api/health: 200 while the database answers, 503 the moment it
+      # stops, which is what makes an unhealthy container actually mean
+      # something.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    # SIGTERM → adapter-node stops accepting new connections and drains
+    # existing ones (bounded by SHUTDOWN_TIMEOUT above) → the app's own
+    # shutdown handler closes every open SSE stream, runs
+    # `PRAGMA wal_checkpoint(TRUNCATE)`, and closes the database
+    # (CONTRACT.md §3.8). 30s gives that whole sequence 10s of slack past
+    # SHUTDOWN_TIMEOUT. If Docker ever has to SIGKILL because this elapsed,
+    # the next boot still recovers cleanly from whatever the WAL was left
+    # holding — SQLite's WAL recovery is exactly designed for this — but it
+    # is worth finding out why the shutdown took that long.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+volumes:
+  zembil_data:
+    name: zembil_data

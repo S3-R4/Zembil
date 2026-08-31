@@ -122,6 +122,22 @@ export function subscribe(
 	};
 }
 
+/**
+ * CONTRACT.md §3.8 graceful shutdown: closes every open stream so the HTTP
+ * server can finish closing. An SSE response never ends on its own, so without
+ * this a SIGTERM waits for the container's kill timeout instead of exiting 0.
+ *
+ * No `session.revoked` is sent first — nothing was revoked. Clients reconnect
+ * and revalidate on `open` (§4), which is exactly the right behaviour across a
+ * restart.
+ *
+ * Additive to the §4.1 surface rather than a change to it: the four functions
+ * pinned there keep their signatures.
+ */
+export function closeAllStreams(): void {
+	for (const stream of [...streams]) terminate(stream);
+}
+
 /** Introspection for tests. Not part of the §4.1 contract surface. */
 export function streamCount(sessionId?: string): number {
 	if (sessionId === undefined) return streams.size;

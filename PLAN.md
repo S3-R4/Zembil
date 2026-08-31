@@ -213,4 +213,6 @@ cancelled, so the implementing agents must verify these themselves rather than t
    stalled stream rather than 64 events — see D-028. Reverse-proxy buffering (`proxy_buffering off`)
    is untested and stays with M4.
 3. **Node 26 base image tags and non-root volume ownership** — confirm against the registry, on the
-   target architecture.
+   target architecture. Still open; it belongs to M4, and the comments already written into the
+   `Dockerfile` claiming it was verified were written by an agent that terminated before it ran
+   anything. They are treated as unverified until a `docker compose up` says otherwise.

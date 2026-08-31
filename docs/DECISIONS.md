@@ -696,3 +696,80 @@ Three rulings worth their reasons:
 be built and verified against Docker 29.6.0 without waiting for M2 to land. This is the parallel case
 the file-ownership table was built for: the sets are disjoint, so the only real coupling was the
 seam, and the seam is now in the document both agents are handed rather than in either agent's head.
+
+---
+
+## D-032 — The request seam is a factory, not a module side effect
+
+**Decision.** `src/hooks.server.ts` does nothing but the once-per-process startup of §3.8 and then
+exports `createHandle(db, config)` from `$lib/server/auth/handle.ts`. The per-request logic —
+origin check, session resolution, security headers, the `must_change_password` gate — lives in that
+factory and takes its connection and configuration as arguments.
+
+**Rationale.** `hooks.server.ts` must run migrations and bootstrap at module load, because §6
+requires a failed migration to crash the process rather than surface as a 500 on the first request.
+That makes the module unimportable from a test: evaluating it opens `/data/zembil.db`, hashes a
+password and registers signal handlers. The first draft put the `handle` implementation there too,
+and the result was a request seam carrying four of the milestone's guards — including the
+load-bearing Origin check — with no way to exercise any of them.
+
+**Consequence.** `tests/auth/handle.test.ts` drives the real hook against a temporary database, and
+the mutation sweep below could reach all eleven of its guards. The cost is one extra module and one
+extra indirection in the file SvelteKit actually loads.
+
+Two smaller rulings recorded here rather than given their own numbers:
+
+- **`closeAllStreams()` is added to the §4.1 bus surface.** §3.8 requires SIGTERM to close every
+  open SSE stream, and an SSE response never ends on its own — without this the container waits for
+  its kill timeout instead of exiting 0. The addition is purely additive; the four functions §4.1
+  pins keep their signatures. No `session.revoked` is sent first, because nothing was revoked:
+  clients reconnect and revalidate on `open`, which is the right behaviour across a restart.
+- **The `must_change_password` gate covers `/api/**` only.** §3.2 says "every endpoint". Taken
+  literally that includes the HTML shell, which is where the change-password screen lives — the
+  member would be locked out of the one action that clears the flag. Every route that returns family
+  data is under `/api/`, so that is where the gate sits.
+
+---
+
+## D-033 — M2's mutation sweep, and the third outcome a mutation can have
+
+**Decision.** 102 mutations were applied across M2's guards (93 in the first pass, 9 corrections and
+re-runs in the second). 99 were killed. The remaining three are kept and documented in the code
+rather than tested, because no test can distinguish them: they are **provably redundant**, which
+D-030 did not anticipate as a category distinct from *vacuous*.
+
+| Guard | Why no test can kill it |
+|---|---|
+| `clientIp`'s `if (trustProxy <= 0) return socketAddress` | With `N = 0` the index is `parts[parts.length]`, always `undefined`, which falls through to the same socket address. Deleting the line changes no behaviour. |
+| `verification.verified` alongside `!info` in `verifyRegistration` | `@simplewebauthn` v13 throws rather than returning `{verified:false}` with a `registrationInfo`, so the two halves are never separately reachable. |
+| `Number.isSafeInteger` in `config.parseIntEnv` | Every current caller passes a `max` small enough (20, 3650) to reject `1e300` and `9007199254740993` anyway. |
+
+**Rationale.** A vacuous guard and a redundant one look identical from the sweep — both stay green —
+and treating them the same way produces one of two bad outcomes: deleting a correct guard, or
+writing a test that asserts something the code does not actually decide. The distinction is whether
+the *protection* is missing (vacuous: the property is unenforced, and the sweep has found a hole) or
+merely *duplicated* (redundant: the property holds through another path, and the guard is insurance
+against a later refactor breaking that path). The first is a defect. The second is a comment that
+was never written.
+
+Four survivors from the first pass were genuine test gaps and were fixed rather than explained:
+
+- **A registration challenge was accepted by the authentication flow.** The purpose column was
+  checked, but the only test aiming at it went the harmless direction — a login challenge into
+  registration, which the separate `userId !== user.id` guard rejects for its own reasons. The
+  dangerous direction is a registration challenge, which carries a `user_id`, handed to
+  `passkey/login/verify`. Now tested.
+- **The challenge TTL asserted itself.** The test compared `expires_at - created_at` against
+  `CHALLENGE_TTL_MS`, so any change to the constant moved the assertion with it. Now pinned to the
+  literal five minutes.
+- **Bootstrap's in-transaction re-read looked dead.** It is not: bootstrap awaits a scrypt between
+  reading the user count and opening its transaction, and `scripts/bootstrap-admin.js` can be
+  running against the same file from another process while the container starts. The test now
+  commits a competing row synchronously inside that window.
+- **Bootstrap's outer check has no observable outcome, only a cost.** It exists so a restart does
+  not pay for a scrypt it will discard. The test asserts the cost, since the outcome is identical
+  either way.
+
+**Consequence.** D-030's exit criterion stands with one refinement: a surviving mutation is a
+finding, and closing it means *either* a test that kills it *or* a written argument that the
+protection exists elsewhere. Silence is not one of the options.

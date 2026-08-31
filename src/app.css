@@ -1,0 +1,536 @@
+/**
+ * Zembil design tokens and base styles — docs/DESIGN.md.
+ *
+ * Everything visual starts here. Components carry layout and behaviour; colour,
+ * type, radius and height come from the tokens below so the dark theme is a
+ * token swap and not a second stylesheet.
+ */
+
+/* ---------------------------------------------------------------------------
+ * Fonts — self-hosted woff2 (D-015), never Google Fonts: a font request from a
+ * family's shopping list is a third party learning when they shop. Both faces
+ * are variable, so one file covers every weight the design uses.
+ *
+ * latin-ext is not optional here. ş, ğ, ı and İ live in it, and "Ayşe" or
+ * "Kağıt" would otherwise fall back mid-word to a different typeface.
+ * ------------------------------------------------------------------------ */
+@font-face {
+	font-family: 'DM Sans';
+	src: url('/fonts/dm-sans-latin.woff2') format('woff2');
+	font-weight: 400 700;
+	font-display: swap;
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+		U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+	font-family: 'DM Sans';
+	src: url('/fonts/dm-sans-latin-ext.woff2') format('woff2');
+	font-weight: 400 700;
+	font-display: swap;
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+		U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+		U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	src: url('/fonts/bricolage-latin.woff2') format('woff2');
+	font-weight: 400 800;
+	font-display: swap;
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+		U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+	font-family: 'Bricolage Grotesque';
+	src: url('/fonts/bricolage-latin-ext.woff2') format('woff2');
+	font-weight: 400 800;
+	font-display: swap;
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+		U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+		U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tokens. Light is the base; dark redefines only what changes, under BOTH
+ * `[data-theme="dark"]` and `prefers-color-scheme` guarded by
+ * `:not([data-theme="light"])`, so the Appearance control wins in both
+ * directions rather than only when it agrees with the OS.
+ * ------------------------------------------------------------------------ */
+:root {
+	--bg: #f4f0e8;
+	--surface: #fffcf6;
+	--surface-sunk: #f6f0e6;
+	--surface-muted: #efe7d8;
+	--border: #e6dece;
+	--border-strong: #ded6c6;
+	--border-dashed: #cfc5b1;
+	--rule: #e2daca;
+	--text: #191510;
+	--text-2: #3e382e;
+	--text-3: #6e6559;
+	--text-muted: #8b8272;
+	--text-faint: #9a917f;
+	--text-disabled: #bcb2a0;
+	--accent: #b15a2b;
+	--accent-deep: #8e4520;
+	--accent-tint: #f6e3d6;
+	--on-accent: #fffcf6;
+	--danger: #71241b;
+	--shadow-sheet: 0 -18px 48px rgb(25 21 16 / 12%);
+
+	--sans: 'DM Sans', system-ui, sans-serif;
+	--display: 'Bricolage Grotesque', 'DM Sans', system-ui, sans-serif;
+
+	/* Store palette — spine, chip background, chip text, per key. */
+	--c-terracotta: #b15a2b;
+	--c-terracotta-bg: #f6e3d6;
+	--c-terracotta-fg: #8e4520;
+	--c-green: #4c7a4e;
+	--c-green-bg: #e2ede1;
+	--c-green-fg: #345c36;
+	--c-violet: #7a6ea8;
+	--c-violet-bg: #e7e4f0;
+	--c-violet-fg: #4c4373;
+	--c-blue: #43708f;
+	--c-blue-bg: #dfeaf1;
+	--c-blue-fg: #2c5069;
+	--c-amber: #9a7220;
+	--c-amber-bg: #f3e8cd;
+	--c-amber-fg: #6f5111;
+	--c-rose: #a2506a;
+	--c-rose-bg: #f4e0e6;
+	--c-rose-fg: #7a3550;
+	--c-teal: #3d7a75;
+	--c-teal-bg: #ddeceb;
+	--c-teal-fg: #275c58;
+	--c-slate: #5f6672;
+	--c-slate-bg: #e5e7ea;
+	--c-slate-fg: #414752;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		--bg: #0f0d0b;
+		--surface: #191613;
+		--surface-sunk: #161311;
+		--surface-muted: #241f1a;
+		--border: #2a251f;
+		--border-strong: #352f27;
+		--border-dashed: #3b342b;
+		--rule: #241f1a;
+		--text: #f0ebe1;
+		--text-2: #d8d1c5;
+		--text-3: #a29788;
+		--text-muted: #8a8072;
+		--text-faint: #6f6659;
+		--text-disabled: #4c453c;
+		--accent: #e08a54;
+		--accent-deep: #f0b088;
+		--accent-tint: #33221a;
+		--on-accent: #16110d;
+		--danger: #e08a7e;
+		--shadow-sheet: 0 -18px 48px rgb(0 0 0 / 50%);
+
+		--c-terracotta: #e08a54;
+		--c-terracotta-bg: #33221a;
+		--c-terracotta-fg: #f0c3a5;
+		--c-green: #7fb183;
+		--c-green-bg: #1b241b;
+		--c-green-fg: #cfe4cf;
+		--c-violet: #a89ddb;
+		--c-violet-bg: #201d2b;
+		--c-violet-fg: #d9d3ef;
+		--c-blue: #79aecd;
+		--c-blue-bg: #16222a;
+		--c-blue-fg: #cbe2ee;
+		--c-amber: #d6ac5c;
+		--c-amber-bg: #262014;
+		--c-amber-fg: #eeddb6;
+		--c-rose: #d68aa4;
+		--c-rose-bg: #281a1f;
+		--c-rose-fg: #f0cfda;
+		--c-teal: #6fb3ad;
+		--c-teal-bg: #14231f;
+		--c-teal-fg: #c6e4e0;
+		--c-slate: #9aa2ae;
+		--c-slate-bg: #1e2024;
+		--c-slate-fg: #d7dbe1;
+	}
+}
+
+:root[data-theme='dark'] {
+	--bg: #0f0d0b;
+	--surface: #191613;
+	--surface-sunk: #161311;
+	--surface-muted: #241f1a;
+	--border: #2a251f;
+	--border-strong: #352f27;
+	--border-dashed: #3b342b;
+	--rule: #241f1a;
+	--text: #f0ebe1;
+	--text-2: #d8d1c5;
+	--text-3: #a29788;
+	--text-muted: #8a8072;
+	--text-faint: #6f6659;
+	--text-disabled: #4c453c;
+	--accent: #e08a54;
+	--accent-deep: #f0b088;
+	--accent-tint: #33221a;
+	--on-accent: #16110d;
+	--danger: #e08a7e;
+	--shadow-sheet: 0 -18px 48px rgb(0 0 0 / 50%);
+
+	--c-terracotta: #e08a54;
+	--c-terracotta-bg: #33221a;
+	--c-terracotta-fg: #f0c3a5;
+	--c-green: #7fb183;
+	--c-green-bg: #1b241b;
+	--c-green-fg: #cfe4cf;
+	--c-violet: #a89ddb;
+	--c-violet-bg: #201d2b;
+	--c-violet-fg: #d9d3ef;
+	--c-blue: #79aecd;
+	--c-blue-bg: #16222a;
+	--c-blue-fg: #cbe2ee;
+	--c-amber: #d6ac5c;
+	--c-amber-bg: #262014;
+	--c-amber-fg: #eeddb6;
+	--c-rose: #d68aa4;
+	--c-rose-bg: #281a1f;
+	--c-rose-fg: #f0cfda;
+	--c-teal: #6fb3ad;
+	--c-teal-bg: #14231f;
+	--c-teal-fg: #c6e4e0;
+	--c-slate: #9aa2ae;
+	--c-slate-bg: #1e2024;
+	--c-slate-fg: #d7dbe1;
+}
+
+/* ---------------------------------------------------------------------------
+ * Base
+ * ------------------------------------------------------------------------ */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	background: var(--bg);
+	/* Tells form controls and scrollbars which way round we are. */
+	color-scheme: light dark;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--sans);
+	font-size: 17px;
+	line-height: 1.45;
+	-webkit-font-smoothing: antialiased;
+	/* The list scrolls; the page itself must not rubber-band under the sheets. */
+	overscroll-behavior-y: none;
+	/* Never suppress a pinch-zoom for a sighted-user convenience. */
+	text-size-adjust: 100%;
+}
+
+h1,
+h2,
+h3,
+p,
+figure {
+	margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	cursor: pointer;
+	border: 0;
+	background: none;
+	/* iOS adds a tap flash on every button; the design has its own press state. */
+	-webkit-tap-highlight-color: transparent;
+	touch-action: manipulation;
+}
+
+a {
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 6px;
+}
+
+/* Visible only to screen readers. Used for live regions and form labels the
+ * design renders as placeholders. */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Type roles
+ * ------------------------------------------------------------------------ */
+.z-eyebrow {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.z-title {
+	font-family: var(--sans);
+	font-size: 30px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.1;
+}
+
+.z-display {
+	font-family: var(--display);
+	font-size: 34px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.1;
+}
+
+.z-card-title {
+	font-family: var(--display);
+	font-size: 22px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+.z-meta {
+	font-size: 14px;
+	color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------------------
+ * Controls. Heights come straight from the DESIGN.md metrics table; the 44px
+ * floor is a hard rule, not a target.
+ * ------------------------------------------------------------------------ */
+.z-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 44px;
+	height: 68px;
+	padding: 0 26px;
+	border-radius: 22px;
+	background: var(--accent);
+	color: var(--on-accent);
+	font-size: 19px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.z-btn:active {
+	transform: scale(0.985);
+}
+
+.z-btn[disabled] {
+	background: var(--surface-muted);
+	color: var(--text-disabled);
+	cursor: default;
+	transform: none;
+}
+
+.z-btn--secondary {
+	height: 58px;
+	border-radius: 18px;
+	background: var(--surface-muted);
+	color: var(--text-2);
+	font-size: 17px;
+}
+
+.z-btn--tertiary {
+	height: 48px;
+	border-radius: 16px;
+	background: transparent;
+	border: 1px solid var(--border-strong);
+	color: var(--text-2);
+	font-size: 16px;
+	font-weight: 600;
+}
+
+.z-btn--danger {
+	background: transparent;
+	border: 1px solid var(--border-strong);
+	color: var(--danger);
+}
+
+.z-btn--auto {
+	width: auto;
+}
+
+.z-field {
+	display: block;
+	width: 100%;
+	height: 60px;
+	padding: 0 18px;
+	border: 1px solid var(--border-strong);
+	border-radius: 16px;
+	background: var(--surface);
+	/* 18px, never below 16: iOS zooms the whole page on focus below that, and
+	 * the zoom does not come back. */
+	font-size: 18px;
+}
+
+.z-field::placeholder {
+	color: var(--text-faint);
+}
+
+.z-field:focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px var(--accent);
+}
+
+.z-field--multiline {
+	height: auto;
+	min-height: 60px;
+	padding: 16px 18px;
+	resize: vertical;
+}
+
+.z-chip {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 44px;
+	height: 44px;
+	padding: 0 12px;
+	border-radius: 14px;
+	background: var(--accent-tint);
+	color: var(--accent-deep);
+	font-size: 15px;
+	font-weight: 700;
+}
+
+.z-card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 22px;
+	padding: 18px 20px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Store palette, applied by key. The key never reaches CSS as a value — it
+ * selects a class, so an unexpected string renders unstyled instead of
+ * injecting anything.
+ * ------------------------------------------------------------------------ */
+[data-color='terracotta'] {
+	--spine: var(--c-terracotta);
+	--chip-bg: var(--c-terracotta-bg);
+	--chip-fg: var(--c-terracotta-fg);
+}
+[data-color='green'] {
+	--spine: var(--c-green);
+	--chip-bg: var(--c-green-bg);
+	--chip-fg: var(--c-green-fg);
+}
+[data-color='violet'] {
+	--spine: var(--c-violet);
+	--chip-bg: var(--c-violet-bg);
+	--chip-fg: var(--c-violet-fg);
+}
+[data-color='blue'] {
+	--spine: var(--c-blue);
+	--chip-bg: var(--c-blue-bg);
+	--chip-fg: var(--c-blue-fg);
+}
+[data-color='amber'] {
+	--spine: var(--c-amber);
+	--chip-bg: var(--c-amber-bg);
+	--chip-fg: var(--c-amber-fg);
+}
+[data-color='rose'] {
+	--spine: var(--c-rose);
+	--chip-bg: var(--c-rose-bg);
+	--chip-fg: var(--c-rose-fg);
+}
+[data-color='teal'] {
+	--spine: var(--c-teal);
+	--chip-bg: var(--c-teal-bg);
+	--chip-fg: var(--c-teal-fg);
+}
+[data-color='slate'] {
+	--spine: var(--c-slate);
+	--chip-bg: var(--c-slate-bg);
+	--chip-fg: var(--c-slate-fg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Motion. Both animations are opt-in on prefers-reduced-motion.
+ * ------------------------------------------------------------------------ */
+@keyframes zTick {
+	0% {
+		transform: scale(1);
+	}
+	45% {
+		transform: scale(0.86);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
+@keyframes zShimmer {
+	0% {
+		background-position: -200px 0;
+	}
+	100% {
+		background-position: calc(200px + 100%) 0;
+	}
+}
+
+@keyframes zSheetIn {
+	from {
+		transform: translateY(12px);
+		opacity: 0;
+	}
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.z-tick-anim {
+		animation: zTick 220ms ease;
+	}
+	.z-skeleton {
+		background: linear-gradient(
+			90deg,
+			var(--surface-muted) 0%,
+			var(--surface) 40%,
+			var(--surface-muted) 80%
+		);
+		background-size: 200px 100%;
+		background-repeat: no-repeat;
+		animation: zShimmer 1.2s infinite linear;
+	}
+	.z-sheet-anim {
+		animation: zSheetIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+}

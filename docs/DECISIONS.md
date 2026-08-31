@@ -665,3 +665,34 @@ route seam gets its own pass every time: guards reachable only through a query s
 parameter or a raw JSON body are invisible to domain-level tests by construction, and three of the
 five findings above lived exactly there. This is also why the reviewer agent's brief says to attack
 the tests as hard as the code — that instruction came out of round 1 and has paid for itself twice.
+
+---
+
+## D-031 — The deployment seam is pinned before M2 and M4 run in parallel
+
+**Decision.** `CONTRACT.md` §3.8 now specifies `GET /api/health`, where bootstrap runs, and what
+`SIGTERM` does. `zembil-auth` (M2) and `zembil-deploy` (M4) then run concurrently, since PLAN.md §4
+gives them disjoint file sets.
+
+**Rationale.** M4 cannot write a healthcheck, an entrypoint or a backup script without knowing what
+M2 builds, and M2 owns every file that would answer those questions. The contract had nothing on any
+of the three — a gap invisible while the milestones were sequential, and guaranteed to produce two
+incompatible guesses the moment they are not.
+
+Three rulings worth their reasons:
+
+- **`/api/health` returns two words.** It is the only unauthenticated endpoint and the only one
+  exempt from the origin check, and it faces the public internet. A health endpoint that reports the
+  build version hands an attacker a free fingerprint for choosing a matching CVE. It must still
+  return `503` when the database is gone, or Docker restarts nothing while every real request 500s.
+- **Bootstrap runs in-process, at `hooks.server.ts` load.** The brief's constraint is a single
+  `docker compose up`; a first-admin step an operator has to know about does not meet it. The
+  generated password is logged once, at `warn`, with `must_change_password` set — a handoff
+  credential, not a standing one.
+- **`SIGTERM` checkpoints the WAL.** A container killed mid-write leaves a `-wal` sidecar that
+  SQLite can recover but a file-copy backup cannot, and that is discovered at restore time.
+
+**Consequence.** M2 gains one route and a shutdown hook it would not otherwise have written. M4 can
+be built and verified against Docker 29.6.0 without waiting for M2 to land. This is the parallel case
+the file-ownership table was built for: the sets are disjoint, so the only real coupling was the
+seam, and the seam is now in the document both agents are handed rather than in either agent's head.

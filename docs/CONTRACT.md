@@ -1048,6 +1048,41 @@ break. HSTS is set by the reverse proxy and documented in the README, not by the
 
 ---
 
+### 3.8 Health, bootstrap and shutdown — the deployment seam
+
+These three are normative because `zembil-auth` implements them and `zembil-deploy` depends on them.
+
+**`GET /api/health`** — the ONLY unauthenticated endpoint in the application, and the only one exempt
+from the `Origin` check. `200` → `{ "status": "ok" }` when a trivial query (`SELECT 1`) answers;
+`503` → `{ "status": "unavailable" }` when it does not. `Cache-Control: no-store`.
+
+It returns those two words and nothing else — no version, no uptime, no migration number, no user
+count, no error text. This endpoint is reachable from the public internet by anyone who finds the
+hostname, and a health endpoint that reports the build is a free fingerprint for picking a matching
+CVE. Diagnostic detail goes to the log, where an operator can already read it.
+
+The `503` is what makes it worth having: the container must report unhealthy when the database is
+gone, or Docker restarts nothing while every real request 500s.
+
+**Bootstrap runs in-process**, in `src/hooks.server.ts`, immediately after migrations and before the
+server listens — not from the entrypoint, and not from a separate container. The brief requires the
+app to come up with a single `docker compose up`, so first-admin creation cannot be a step an
+operator has to know to run. It is idempotent per §6: it acts only when `SELECT COUNT(*) FROM users`
+returns zero.
+
+When `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD` is unset, the generated password is logged **once**, at
+`warn`, as the only copy that will ever exist — with `must_change_password` set on the account, so it
+is a handoff credential and not a standing one. `scripts/bootstrap-admin.*` exists for the separate
+case of an operator who has locked themselves out; it is never part of normal startup.
+
+**Graceful shutdown.** On `SIGTERM` the process stops accepting connections, closes every open SSE
+stream (clients reconnect and revalidate on `open`, per §4), runs `PRAGMA wal_checkpoint(TRUNCATE)`,
+closes the database, and exits 0. A container killed mid-checkpoint leaves a `-wal` file that is
+recoverable but makes a file-copy backup inconsistent, which is precisely when an operator discovers
+their backups were never any good.
+
+---
+
 ## 6. Environment variables
 
 | Name | Type | Required | Default | Notes |

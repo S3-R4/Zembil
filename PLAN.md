@@ -212,7 +212,11 @@ cancelled, so the implementing agents must verify these themselves rather than t
    subscriptions do not leak. The same probe measured the `desiredSize` teardown bound at ~2.5 MB per
    stalled stream rather than 64 events — see D-028. Reverse-proxy buffering (`proxy_buffering off`)
    is untested and stays with M4.
-3. **Node 26 base image tags and non-root volume ownership** — confirm against the registry, on the
-   target architecture. Still open; it belongs to M4, and the comments already written into the
-   `Dockerfile` claiming it was verified were written by an agent that terminated before it ran
-   anything. They are treated as unverified until a `docker compose up` says otherwise.
+3. ~~**Node 26 base image tags and non-root volume ownership** — confirm against the registry, on
+   the target architecture.~~
+   **Closed 2026-08-31.** `docker manifest inspect node:26-alpine` lists `linux/amd64` and
+   `linux/arm64/v8`; the tag currently runs Node v26.8.1. On a fresh named volume `/data` ends up
+   `node:node`-owned with no entrypoint-side chown. The same pass found the real defect this probe
+   existed to catch, which was not the one it was aimed at: `adapter-node` does **not** bundle
+   `@simplewebauthn/server` into `build/`, so a runtime stage with no `node_modules` died with
+   `ERR_MODULE_NOT_FOUND` before any application code ran. See D-034.

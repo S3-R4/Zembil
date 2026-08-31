@@ -773,3 +773,40 @@ Four survivors from the first pass were genuine test gaps and were fixed rather 
 **Consequence.** D-030's exit criterion stands with one refinement: a surviving mutation is a
 finding, and closing it means *either* a test that kills it *or* a written argument that the
 protection exists elsewhere. Silence is not one of the options.
+
+---
+
+## D-034 — The runtime image ships production `node_modules`, because the bundler does not
+
+**Decision.** The Dockerfile has a third stage, `deps`, running `npm ci --omit=dev --ignore-scripts`,
+and the runtime stage copies its `node_modules`. The runtime image is not dependency-free.
+
+**Rationale.** The Dockerfile that M4's terminated agent left behind asserted the opposite, in a
+comment that presented itself as measured: that `@sveltejs/adapter-node` bundles every dependency
+into `build/`, so `grep`ing the build output for bare imports returns nothing and no `node_modules`
+need ship. It is not true of this project. `build/server/chunks/webauthn.js-*.js` contains a bare
+`import ... from "@simplewebauthn/server"`, and the container died on its first line:
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@simplewebauthn/server'
+    imported from /app/build/server/chunks/chunks/webauthn.js-Dh8I-ubq.js
+```
+
+The failure mode is worth naming: this happens before `hooks.server.ts` is evaluated, so there is no
+migration log, no bootstrap banner, no health endpoint and no application error — only a Node stack
+trace and a container that restarts forever. A deployment that had shipped this would have looked
+like a database problem.
+
+`--ignore-scripts` because nothing in the dependency tree needs a postinstall, and a build stage
+that runs arbitrary install scripts to produce the image's runtime is a supply-chain surface with no
+benefit here. `node:sqlite` is inside the Node binary, so there is still no native addon to compile
+and musl remains irrelevant.
+
+**Consequence.** The image is larger by the size of two packages. The comment in the Dockerfile now
+records the measurement and tells the next reader to run the container rather than trust the claim.
+
+More generally: three comments in that partial Dockerfile claimed verification (`node_modules`, the
+base-image manifest, `/data` ownership) and the agent that wrote them terminated at the spend limit
+before running anything. Two of the three happened to be right. Written-in-the-past-tense
+verification is not verification, and this is the second time in this project that a confidently
+worded comment has been the thing that was wrong — see D-030.

@@ -9,10 +9,16 @@
 
 	let { data } = $props();
 
-	// Seeded from the load so the first paint is real content, then owned by the
-	// reactive store so realtime hints and writes both land in one place.
+	// Rendered from the load payload until the reactive store has been seeded.
+	// The seeding happens in an effect, and effects do not run during SSR — so
+	// reading `shops.stores` directly would server-render "No shops yet" and hold
+	// it until the bundle hydrates. It must stay in an effect: `shops` is a
+	// module singleton that the Node process shares across every request, and a
+	// write outside an effect would serve one member's state to the next caller.
+	let stores = $derived(shops.loaded ? shops.stores : data.stores);
+
 	$effect(() => {
-		if (!shops.loaded) shops.seed(data.stores);
+		shops.seed(data.stores);
 	});
 
 	let adding = $state(false);
@@ -50,14 +56,14 @@
 <div class="body">
 	<Banner message={shops.error} onretry={() => shops.load()} />
 
-	{#if shops.stores.length === 0}
+	{#if stores.length === 0}
 		<div class="empty">
 			<p class="z-card-title">No shops yet</p>
 			<p class="z-meta">Add one, and everything you need there lives on its own list.</p>
 		</div>
 	{:else}
 		<ul>
-			{#each shops.stores as store (store.id)}
+			{#each stores as store (store.id)}
 				<li><StoreCard {store} /></li>
 			{/each}
 		</ul>

@@ -49,3 +49,12 @@ today.
 | **Playwright on WebKit and Firefox** | The suite runs on Chromium because that is the only engine installed here, and the WebAuthn virtual authenticator is a Chrome DevTools Protocol feature with no cross-engine equivalent. Mobile Safari is the single most likely target for this app, so a WebKit run is the highest-value addition to the suite. |
 | **A real HTTPS passkey run** | Passkeys are verified over `http://localhost`, which is a secure context and exercises the identical code path. What is untested is a deployment where `ZEMBIL_RP_ID` does not match the host — a configuration failure the README warns about and nothing currently catches at startup beyond the suffix assertion. A boot-time self-check against the live origin could close it. |
 | **A reviewer pass over M2, M3 and M4** | Not deferred by choice: the reviewer agents terminated at the account's spend limit. Tracked in `PLAN.md` §5 M5 rather than here, because it is a milestone exit criterion and not a feature. |
+
+## Found by the M2/M3/M4 audits
+
+| Item | Why deferred / note |
+|---|---|
+| **Automatic pre-migration snapshot** | D-013's third bullet promises every migration takes a `pre-migration-<from>-to-<to>.sqlite` snapshot first and refuses to proceed if it fails. `src/lib/server/db/migrations.ts` mentions it in a comment and does not do it; `README.md` tells the operator to take one by hand. The in-process `backup()` D-013 measured is the right mechanism. This is the largest unkept promise in `DECISIONS.md`. |
+| **`ZEMBIL_LOG_LEVEL` actually filtering** | It is parsed and validated at startup (`config.ts`) and nothing reads it. `.env.example` and `README.md` now say so plainly rather than describing behaviour that does not exist. A `log(level, …)` helper used by the non-critical call sites is an hour's work; the bootstrap banner must stay unconditional at `warn`. |
+| **`pre-restore-<stamp>/` retention** | Each restore roughly doubles the volume's size and nothing removes the old ones. Deliberate — they are the undo — but the README now documents cleaning them up, and a `--keep N` flag on `restore.sh` would be better than a documented `rm -rf`. |
+| **Store-edit UI** | Already listed above; the M3 audit independently reached the same conclusion about R-14's un-archive promise. |

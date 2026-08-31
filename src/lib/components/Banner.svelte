@@ -24,7 +24,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		min-height: 48px;
+		min-height: 56px;
 		padding: 10px 16px;
 		border-radius: 16px;
 		background: var(--accent-tint);
@@ -35,7 +35,10 @@
 
 	button {
 		flex: none;
-		height: 36px;
+		/* 44px, not 36: DESIGN.md §3 has no exceptions, and this is the one
+		 * control §4 names for the offline state. */
+		min-width: 44px;
+		height: 44px;
 		padding: 0 14px;
 		border-radius: 12px;
 		background: var(--surface);

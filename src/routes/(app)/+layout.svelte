@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
 	import { connectRealtime } from '$lib/client/realtime';
-	import { forgetLists, listFor, shops } from '$lib/client/app.svelte';
+	import { forgetLists, listFor, revalidateAll, shops } from '$lib/client/app.svelte';
 	import BottomNav from '$lib/components/BottomNav.svelte';
 	import type { Snippet } from 'svelte';
 
@@ -31,7 +31,8 @@
 				await goto('/login', { replaceState: true });
 			},
 			revalidate() {
-				void shops.load();
+				// §4, and it must cover the list on screen too — see `revalidateAll`.
+				revalidateAll();
 			}
 		});
 	});

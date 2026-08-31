@@ -28,6 +28,7 @@ docs
 
 data
 backups
+.playwright-data
 *.sqlite
 *.sqlite-*
 *.db

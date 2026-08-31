@@ -9,6 +9,9 @@ declare global {
 			sessionId: string | null;
 		}
 		interface Error {
+			message: string;
+			/** Set by `loadApi` so `+error.svelte` can distinguish an offline
+			 *  failure from a real status without parsing prose. */
 			code?: string;
 		}
 	}

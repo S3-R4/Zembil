@@ -23,3 +23,4 @@ package-lock.json.bak
 tests/e2e/.auth/
 playwright-report/
 test-results/
+.deploy-test/

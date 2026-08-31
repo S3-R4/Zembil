@@ -17,7 +17,8 @@ password or a passkey.
 - Docker with Compose v2 (`docker compose`, not `docker-compose`). Built and verified on 29.6.0.
 - A reverse proxy terminating HTTPS in front of it. **Passkeys will not work over plain HTTP**, and
   the session cookie is `Secure`. This is not a recommendation.
-- About 200 MB of disk. A family's list for a decade is a few megabytes; the rest is the image.
+- About 300 MB of disk. The built image measures 264 MB; a family's list for a decade is a few
+  megabytes.
 
 Multi-arch: the base image publishes `linux/amd64` and `linux/arm64/v8`, so an x86 home server and a
 Raspberry Pi 4/5 are both fine.
@@ -61,7 +62,8 @@ Caddy needs no SSE configuration: it does not buffer proxied responses, and it s
 
 ```nginx
 server {
-	listen 443 ssl http2;
+	listen 443 ssl;
+	http2 on;
 	server_name zembil.example.com;
 
 	# your certificate directives here
@@ -183,16 +185,34 @@ while the app keeps serving, then reopens that file and runs `PRAGMA integrity_c
 prints the account count so you can see at a glance that you backed up the right thing. Run it from
 cron; it needs no downtime.
 
+### Cleaning up after a restore
+
+Each restore moves the database it replaced into `pre-restore-<stamp>/` **inside the volume** and
+never removes it. That is deliberate — it is the undo — but it means every restore roughly doubles
+the volume's size, and a full volume is the one thing that can make a later restore fail halfway.
+Delete the old ones once you are satisfied:
+
+```sh
+docker run --rm -v zembil_data:/data alpine sh -c 'ls -d /data/pre-restore-*'
+docker run --rm -v zembil_data:/data alpine rm -rf /data/pre-restore-20260831-175727Z
+```
+
 Restoring replaces the database:
 
 ```sh
 ./scripts/restore.sh backups/zembil-20260831-175645Z.db
 ```
 
-It validates the backup *before* touching anything, stops the container, moves the current database
-and both sidecars aside into `/data/pre-restore-<stamp>/` inside the volume, installs the backup,
-and starts the app again. If you restored the wrong file, the old one is still in the volume. Add
-`--yes` to skip the prompt for scripted use.
+It validates the backup *before* touching anything, then refuses to continue unless Docker actually
+answered when asked whether the app is running — "I could not tell" is not "it is not running", and
+treating it that way swaps the database out from under a live process that keeps writing into the
+file it was rescued from. It stops the container, copies the backup in **beside** the live database
+and verifies that copy in place, and only then moves the current database and both sidecars into
+`/data/pre-restore-<stamp>/` and swaps the new file in with an atomic `mv`. If anything fails before
+that swap, nothing has moved. Add `--yes` to skip the prompt for scripted use.
+
+If your deployment renames the container or the volume, set `ZEMBIL_CONTAINER` and `ZEMBIL_VOLUME` —
+the script tells you which names it is using before it asks for confirmation.
 
 Sessions survive a restore only if they existed in the backup; passkeys likewise. Members whose
 accounts were created after the backup was taken will not exist afterwards.
@@ -228,8 +248,17 @@ database serving requests. **Take a backup before upgrading.**
 `.env.example` documents every variable with its default and a reason. `docs/CONTRACT.md` §6 is the
 normative reference if the two ever disagree.
 
-There is no application secret to provision or rotate: sessions are opaque random tokens stored only
-as SHA-256 hashes, so nothing needs signing.
+### Secrets
+
+There is exactly one, and only if you choose to set it: `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD` in `.env`.
+Everything else in that file is configuration. `.env` is git-ignored and must stay that way; it is
+never copied into the image (`.dockerignore` excludes it, and the build context is checked).
+
+There is no application *signing* secret to provision or rotate: sessions are opaque random tokens
+stored only as SHA-256 hashes, so nothing needs signing.
+
+`ZEMBIL_LOG_LEVEL` is validated at startup but nothing filters on it yet — setting it will not hide
+the first-admin password banner. It is in `docs/BACKLOG.md`.
 
 ---
 

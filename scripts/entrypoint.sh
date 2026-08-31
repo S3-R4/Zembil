@@ -24,10 +24,15 @@ DATA_DIR="${ZEMBIL_DATA_DIR:-/data}"
 
 mkdir -p "$DATA_DIR" 2>/dev/null || true
 
-if [ ! -w "$DATA_DIR" ]; then
-	echo "entrypoint: $DATA_DIR is not writable by uid $(id -u) ($(id -un 2>/dev/null || echo unknown))." >&2
+# A REAL write, not `test -w`. On a read-only mount (`-v vol:/data:ro`) the
+# permission bits still say writable and `[ -w ]` passes, and the failure then
+# surfaces as "attempt to write a readonly database" from inside node — which
+# is exactly the cryptic ending this check exists to prevent.
+if ! (touch "$DATA_DIR/.zembil-write-test" && rm -f "$DATA_DIR/.zembil-write-test") 2>/dev/null; then
+	echo "entrypoint: cannot write to $DATA_DIR as uid $(id -u) ($(id -un 2>/dev/null || echo unknown))." >&2
 	echo "entrypoint: the volume mounted there must be writable by this container's" >&2
-	echo "entrypoint: non-root user. See README.md, 'Data and backups'." >&2
+	echo "entrypoint: non-root user, and must not be mounted read-only." >&2
+	echo "entrypoint: See README.md, 'The data volume'." >&2
 	exit 1
 fi
 

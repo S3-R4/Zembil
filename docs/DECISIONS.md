@@ -287,6 +287,25 @@ discovered when it is needed. Both mechanisms above produce a consistent single 
 Forward-only migrations need no down-scripts: the rollback is restoring the pre-migration snapshot,
 which is strictly more reliable than a down-script nobody has ever run.
 
+**Amended at M4 — `scripts/backup.sh` uses `VACUUM INTO`, and that is deliberate.** The M4 audit
+caught the shipped script contradicting the first bullet above without a record, which is fair: a
+decision that was itself a correction of a wrong measurement is exactly the one not to drift away
+from silently. The reasoning has changed with the deployment shape, not with the measurement:
+
+- The argument for `backup()` was that being incremental it "never stalls someone ticking an item in
+  a shop". That concern was about a copy running **inside the app process**. `backup.sh` runs in a
+  separate one-off container against the same volume, and under WAL a reader takes a snapshot
+  without blocking the writer at all — so there is nothing to stall.
+- `VACUUM INTO` is synchronous, which is what a shell script wants: one process, one exit code, no
+  partial-file window to reason about across an `await`.
+- It defragments, so the file an operator carries to a NAS is the smallest correct one.
+
+`backup()` remains the right call for anything running in-process, which is where the pre-migration
+snapshot in the third bullet would live. That snapshot is **still not implemented** —
+`src/lib/server/db/migrations.ts` mentions it in a comment only, and `README.md` currently tells the
+operator to take a backup before upgrading by hand. Recorded in `docs/BACKLOG.md` rather than left as
+an unmarked promise.
+
 ## D-014 — First admin: bootstrap on an empty users table only
 
 **Decision.** At boot, if `SELECT COUNT(*) FROM users` is zero, create the admin from
@@ -845,3 +864,56 @@ instructive, because the test looked *more* thorough for having chosen tidy asce
 
 **Consequence.** 350 unit tests and 10 Playwright specs. The service worker keeps its browser-level
 test — the unit tests prove the rule, and the spec proves the worker actually applies it.
+
+---
+
+## D-036 — Acting on the M2/M3/M4 audits, and what they said about the process
+
+**Decision.** The three reviewer passes that M5 was blocked on finally ran, and their blocking
+findings are closed. This entry records what they found and, more usefully, *why the suite could not
+have found it*.
+
+### M4: `restore.sh` had two ways to destroy the database while printing `restore: done.`
+
+- **A container-name mismatch was read as "not running".** `docker inspect … || echo false` maps a
+  wrong name, a compose project prefix, a socket permission error and a daemon hiccup all onto
+  `false`, and the script then moved the live `zembil.db`, `-wal` and `-shm` aside while the server
+  held them open. The reviewer showed the app healthy and serving with its file descriptors pointing
+  into `pre-restore-…/`, still writing work that the next restart would throw away. Now: any
+  `inspect` failure other than a genuine *No such object* aborts, the resolved container name is
+  printed before the confirmation prompt, and — the part that actually closes it — the swap
+  container proves nothing has the database open by taking an **EXCLUSIVE lock**, which also
+  checkpoints the WAL so the file being moved aside is complete.
+- **The install was not atomic.** `cp` straight over the live path, so a full volume left a
+  truncated `zembil.db` and the only good copy in a directory whose name does not say "this one is
+  the real database". Now the backup is copied to `.zembil.db.incoming`, verified *in place*, and
+  swapped with `mv` on the same filesystem; a failure before that swap leaves the original untouched,
+  and a failure of the swap itself rolls the previous files back.
+
+Both were reachable by an operator on a normal Tuesday. Neither was covered by anything, because
+**nothing in `tests/` touched an M4 artefact at all** — the suite would have stayed green with
+`restore.sh` deleted. `tests/deploy/scripts.test.ts` now shells out to both scripts against a
+scratch Docker volume and pins both regressions.
+
+### M3: two client-state defects that showed a state the server never agreed to
+
+- **`revalidate()` reloaded only the home screen.** §4 makes revalidation-on-`open` normative
+  precisely because a dropped stream replays nothing — no `id:`, no `Last-Event-ID`. The list on
+  screen kept its own cursor and was refetched only by an event arriving over a live stream, so a
+  change made during the gap was lost permanently. The reviewer reproduced the worst presentation of
+  it: the store card reading *2 to buy* above a list showing one row.
+- **`load()` had no generation guard.** Two `/list` responses overtaking each other let the older one
+  win by arriving last, overwriting the items *and* dragging `rev` backwards — silently un-ticking an
+  item the server had accepted, with its own echo already spent.
+
+Both were invisible to 360 green tests, and both are the same shape: a rule stated correctly in the
+contract, implemented for the case the tests exercise, and not for the case a bad connection
+produces.
+
+**Consequence, and the reason this entry exists at all.** Every previous decision in this file that
+corrected a wrong belief — D-030, D-034 — was found by *executing* something. These were found by
+somebody reading the code who had not written it. The mutation sweep is good at "is this guard
+load-bearing"; it is useless at "is there a guard missing here", because it can only break code that
+exists. Those are different questions and the project needs both. The reviewer is not a formality at
+the end of a milestone, and running the milestones without it — which is what the spend limit forced
+for most of a day — produced exactly the class of defect it exists to catch.

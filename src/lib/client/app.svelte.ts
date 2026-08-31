@@ -83,10 +83,6 @@ export class Shops {
 		return body.store;
 	}
 
-	async patch(storeId: string, patch: Record<string, unknown>): Promise<void> {
-		await api(`/api/stores/${storeId}`, { method: 'PATCH', body: patch });
-		await this.load();
-	}
 }
 
 export const shops = new Shops();
@@ -107,6 +103,15 @@ export class ListState {
 	/** Item ids with a write in flight, so a row can show it and a second tap
 	 *  cannot start a competing request. */
 	busy = $state<Set<string>>(new Set());
+	/**
+	 * Increments on every fetch. A response whose generation is no longer the
+	 * current one is discarded — two `/list` requests can overtake each other on
+	 * a flaky link, and without this the OLDER answer wins simply by arriving
+	 * last: it overwrites the items AND drags `rev` backwards, so a tick the
+	 * server accepted is silently un-ticked on screen and its own echo has
+	 * already been spent.
+	 */
+	private generation = 0;
 
 	constructor(storeId: string) {
 		this.storeId = storeId;
@@ -120,26 +125,47 @@ export class ListState {
 		return this.items.filter((i) => i.state === 'ticked');
 	}
 
-	seed(data: { store: StoreSummary; trip: Trip; items: Item[] }): void {
+	/**
+	 * Adopts a `/list` payload. Refuses one that is older than what we already
+	 * have, which is what lets both the page load and a realtime refetch call it
+	 * unconditionally: whichever is newer wins, and neither has to know about the
+	 * other.
+	 */
+	seed(data: { store: StoreSummary; trip: Trip; items: Item[] }): boolean {
+		if (this.loaded && data.store.rev < this.rev) return false;
+
+		// A row with a write in flight keeps its optimistic state. The server's
+		// answer for that row is on its way and will replace it; letting a refetch
+		// that landed first revert the checkbox would show a flicker nobody asked
+		// for, on the one action a member performs several times a minute.
+		const inFlight = new Map(
+			this.items.filter((i) => this.busy.has(i.id)).map((i) => [i.id, i])
+		);
+
 		this.store = data.store;
 		this.trip = data.trip;
-		this.items = sortItems(data.items);
+		this.items = sortItems(data.items.map((i) => inFlight.get(i.id) ?? i));
 		this.rev = data.store.rev;
 		this.loaded = true;
 		this.error = null;
+		return true;
 	}
 
 	async load(): Promise<void> {
+		const mine = ++this.generation;
 		this.loading = true;
 		try {
 			const body = await api<{ store: StoreSummary; trip: Trip; items: Item[] }>(
-				`/api/stores/${this.storeId}/list`
+				`/api/stores/${encodeURIComponent(this.storeId)}/list`
 			);
+			// Superseded while we were waiting. Dropping it is the whole point.
+			if (mine !== this.generation) return;
 			this.seed(body);
 		} catch (err) {
+			if (mine !== this.generation) return;
 			this.error = messageOf(err);
 		} finally {
-			this.loading = false;
+			if (mine === this.generation) this.loading = false;
 		}
 	}
 
@@ -157,13 +183,22 @@ export class ListState {
 	}
 
 	private applyMutation(result: ItemMutation): void {
-		this.rev = result.rev;
+		// §3.5's `rev` proves our own write landed; it does NOT prove we have seen
+		// everything before it. If it is more than one ahead of our cursor,
+		// somebody else committed in between and their `store.changed` — which
+		// carries the lower rev — would now be suppressed by the §4 cursor as if
+		// it were our own echo. Refetch instead of dropping their item.
+		const skipped = this.loaded && result.rev > this.rev + 1;
+
+		this.rev = Math.max(this.rev, result.rev);
 		const index = this.items.findIndex((i) => i.id === result.item.id);
 		const next = [...this.items];
 		if (index === -1) next.push(result.item);
 		else next[index] = result.item;
 		this.items = sortItems(next.filter((i) => i.state !== 'carried'));
-		if (this.store) this.store = { ...this.store, rev: result.rev };
+		if (this.store) this.store = { ...this.store, rev: this.rev };
+
+		if (skipped) void this.load();
 	}
 
 	/**
@@ -188,7 +223,6 @@ export class ListState {
 
 	private async toggle(item: Item, action: 'tick' | 'untick'): Promise<void> {
 		if (this.busy.has(item.id)) return;
-		const before = this.items;
 		const optimistic: Item = {
 			...item,
 			state: action === 'tick' ? 'ticked' : 'pending',
@@ -203,9 +237,11 @@ export class ListState {
 				await api<ItemMutation>(`/api/items/${item.id}/${action}`, { method: 'POST', body: {} })
 			);
 		} catch (err) {
-			// Put the row back exactly as it was. A half-applied guess is worse than
-			// no guess: the member sees a state nobody chose.
-			this.items = before;
+			// Put THIS row back as it was, rebased onto whatever the list looks like
+			// now. Restoring a whole snapshot taken before the request would also
+			// roll back any refetch that landed while we waited — a failed tick on a
+			// bad connection would delete another member's freshly-arrived row.
+			this.items = sortItems(this.items.map((i) => (i.id === item.id ? item : i)));
 			this.error = messageOf(err);
 			if (err instanceof ApiError && (err.code === 'TRIP_CLOSED' || err.code === 'ITEM_NOT_FOUND')) {
 				await this.load();
@@ -218,7 +254,7 @@ export class ListState {
 	/** §3.5: `clientId` is required and is reused across every retry of one
 	 *  compose, so a timeout on cellular cannot produce a duplicate. */
 	async add(name: string, note: string | null, clientId: string): Promise<Item> {
-		const body = await api<{ item: Item }>(`/api/stores/${this.storeId}/items`, {
+		const body = await api<{ item: Item }>(`/api/stores/${encodeURIComponent(this.storeId)}/items`, {
 			method: 'POST',
 			body: note ? { name, note, clientId } : { name, clientId }
 		});
@@ -246,7 +282,7 @@ export class ListState {
 		const tripId = this.trip?.id;
 		if (!tripId) throw new Error('No open trip.');
 		const result = await api<{ boughtCount: number; carriedCount: number }>(
-			`/api/stores/${this.storeId}/trips/close`,
+			`/api/stores/${encodeURIComponent(this.storeId)}/trips/close`,
 			{ method: 'POST', body: { tripId } }
 		);
 		await this.load();
@@ -268,6 +304,31 @@ export function listFor(storeId: string): ListState {
 	return state;
 }
 
+/**
+ * Drops every cached list AND the home screen. Called on sign-out and on
+ * `session.revoked`: the next person to sign in on this device must not see a
+ * frame of the previous one's shopping while the first fetch is in flight.
+ */
 export function forgetLists(): void {
 	lists.clear();
+	shops.stores = [];
+	shops.loaded = false;
+	shops.error = null;
+}
+
+/**
+ * §4's `revalidate`: the EventSource `open` event, `visibilitychange`, `focus`
+ * and `online`. Reloads the home screen AND every list already on screen.
+ *
+ * Reloading only the home screen is not enough, and the failure is invisible:
+ * §4 sends no `id:` and no `Last-Event-ID` replay, so an event emitted while
+ * the stream was down is simply gone. A tablet whose idle stream was dropped by
+ * the proxy would show a store card saying "2 to buy" above a list holding one
+ * row, indefinitely.
+ */
+export function revalidateAll(): void {
+	void shops.load();
+	for (const list of lists.values()) {
+		if (list.loaded) void list.load();
+	}
 }

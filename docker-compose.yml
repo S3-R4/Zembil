@@ -11,6 +11,28 @@ services:
     # but it costs nothing and is cheap insurance.
     init: true
 
+    # Free hardening. None of these is load-bearing given the loopback bind and
+    # the non-root user, and none of them costs anything: the app writes only to
+    # /data, needs no capabilities, and never escalates privileges.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      # adapter-node and node:sqlite both want somewhere to write temporaries;
+      # SQLite's own temp_store is MEMORY (CONTRACT.md §1.1), so this is small.
+      - /tmp:size=16m
+
+    # The first-admin password is written here once and stays until the file
+    # rotates. Anyone in the `docker` group can read it. That is bounded by
+    # must_change_password, but there is no reason to keep it for a year.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
     # The reverse proxy is the only ingress (CONTRACT.md §3.8, D-012).
     # Binding to 127.0.0.1 means nothing on the LAN or the public internet
     # can reach this container directly — only whatever terminates TLS on

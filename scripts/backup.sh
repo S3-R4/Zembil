@@ -31,6 +31,14 @@ NAME="zembil-${STAMP}.db"
 mkdir -p "$DEST"
 DEST="$(cd "$DEST" && pwd)"
 
+case "$DEST" in
+	*:*)
+		echo "backup: '$DEST' contains a colon, which docker -v cannot express." >&2
+		echo "backup: pick a destination without one." >&2
+		exit 1
+		;;
+esac
+
 if ! docker volume inspect "$VOLUME" >/dev/null 2>&1; then
 	echo "backup: no docker volume named '$VOLUME'." >&2
 	echo "backup: set ZEMBIL_VOLUME if your deployment renamed it." >&2
@@ -39,13 +47,30 @@ fi
 
 # uid 1000 is the image's `node` user. Checked up front: a permission failure
 # discovered by VACUUM INTO leaves a zero-byte file that looks like a backup.
+#
+# The docker error is printed rather than swallowed. Every failure here used to
+# be reported as "not writable by uid 1000" with a `sudo chown` next to it —
+# advice that is wrong for a Docker Desktop file-sharing refusal, and dangerous
+# if the operator follows it on a NAS mount.
+probe_err="$(mktemp)"
+trap 'rm -f "$probe_err"' EXIT
 if ! docker run --rm -v "$DEST":/out --entrypoint node "$IMAGE" \
 	-e 'require("node:fs").writeFileSync("/out/.zembil-write-test","");require("node:fs").unlinkSync("/out/.zembil-write-test")' \
-	>/dev/null 2>&1; then
-	echo "backup: $DEST is not writable by uid 1000 (the container's 'node' user)." >&2
-	echo "backup: run   sudo chown 1000:1000 '$DEST'   or pick another destination." >&2
+	>/dev/null 2>"$probe_err"; then
+	echo "backup: cannot write to $DEST. Docker said:" >&2
+	sed 's/^/  /' "$probe_err" >&2
+	echo "backup: if that is a permission error, the directory must be writable by" >&2
+	echo "backup: uid 1000 (the container's 'node' user)." >&2
 	exit 1
 fi
+
+# Any failure below must not leave something matching the backup naming pattern
+# in the destination: a cron job that rotates on filename would keep the junk
+# and drop a good snapshot.
+cleanup_partial() {
+	if [ -e "$DEST/$NAME" ] && [ ! -s "$DEST/$NAME" ]; then rm -f "$DEST/$NAME"; fi
+}
+trap 'rm -f "$probe_err"; cleanup_partial' EXIT
 
 echo "backup: $VOLUME -> $DEST/$NAME"
 
@@ -57,7 +82,9 @@ docker run --rm \
 	-e '
 		const { DatabaseSync } = require("node:sqlite");
 		const out = process.argv[1];
-		const db = new DatabaseSync("/data/zembil.db");
+		// readOnly, so a mistyped ZEMBIL_VOLUME reports "unable to open" rather
+		// than CREATING an empty database in whatever volume it was pointed at.
+		const db = new DatabaseSync("/data/zembil.db", { readOnly: true });
 		db.exec("PRAGMA busy_timeout = 30000");
 		// A single consistent snapshot, written as ONE file with no -wal/-shm
 		// beside it. Safe against a live writer: WAL readers never block it.
@@ -80,4 +107,5 @@ docker run --rm \
 
 ls -l "$DEST/$NAME"
 echo
-echo "Restore with:  ./scripts/restore.sh '$DEST/$NAME'"
+trap 'rm -f "$probe_err"' EXIT
+echo "Restore with:  ./scripts/restore.sh \"$DEST/$NAME\""

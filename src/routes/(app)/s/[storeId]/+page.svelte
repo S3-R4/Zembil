@@ -8,7 +8,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { Item } from '$lib/types';
-	import { listFor, messageOf, shops } from '$lib/client/app.svelte';
+	import { listFor, messageOf, shops, sortItems } from '$lib/client/app.svelte';
 	import { newClientId } from '$lib/client/api';
 	import Banner from '$lib/components/Banner.svelte';
 	import ItemRow from '$lib/components/ItemRow.svelte';
@@ -18,8 +18,18 @@
 
 	let list = $derived(listFor(data.store.id));
 
+	// As on the home screen: render from the load payload until the store has
+	// been seeded, because effects do not run during SSR. `seed()` refuses a
+	// payload older than what it already holds, so calling it on every navigation
+	// is safe and is what repairs a list that missed an event while the stream
+	// was down.
+	let store = $derived(list.loaded ? list.store : data.store);
+	let items = $derived(list.loaded ? list.items : sortItems(data.items));
+	let pending = $derived(items.filter((i) => i.state === 'pending'));
+	let ticked = $derived(items.filter((i) => i.state === 'ticked'));
+
 	$effect(() => {
-		if (!list.loaded) list.seed(data);
+		list.seed(data);
 	});
 
 	// ---- quick add --------------------------------------------------------
@@ -30,29 +40,45 @@
 	let addError = $state<string | null>(null);
 	let justAdded = $state<string | null>(null);
 	let nameInput = $state<HTMLInputElement | null>(null);
-	// §3.5: one clientId per compose, reused across every retry of that compose,
-	// fresh only for a new item. Regenerated after each successful add below.
+	// §3.5 / R-17: one clientId per compose, reused across every retry of THAT
+	// compose, fresh only for a new item. `failedFor` is what makes "that
+	// compose" precise — see submitAdd.
 	let clientId = $state(newClientId());
+	let failedFor = $state<string | null>(null);
 
 	async function submitAdd(event: SubmitEvent) {
 		event.preventDefault();
 		const name = draftName.trim();
 		if (addBusy || name.length === 0) return;
+		// A previous attempt failed and the member has since typed something else.
+		// That is a NEW item, not a retry: reusing the old clientId would make the
+		// server answer 200 with the item the earlier attempt actually committed —
+		// R-17 working exactly as designed, on a request that no longer means what
+		// it did.
+		if (failedFor !== null && failedFor !== name) {
+			clientId = newClientId();
+			failedFor = null;
+		}
 		addBusy = true;
 		addError = null;
 		try {
-			await list.add(name, draftNote.trim() || null, clientId);
-			justAdded = name;
+			const added = await list.add(name, draftNote.trim() || null, clientId);
+			// The server's name, not the typed one. On an idempotent hit the server
+			// returns the item it already had, which may not be what was just typed.
+			justAdded = added.name;
 			draftName = '';
 			draftNote = '';
 			clientId = newClientId();
+			failedFor = null;
 			// The sheet stays open and the caret goes back to the name field. This
 			// is the whole point of the sheet.
 			nameInput?.focus();
 			void shops.load();
 		} catch (err) {
-			// The clientId is deliberately NOT regenerated: this is still the same
-			// compose, and the next attempt must be the same idempotent request.
+			// The clientId is deliberately NOT regenerated: while the text is
+			// unchanged this is still the same compose, and the next attempt must be
+			// the same idempotent request.
+			failedFor = name;
 			addError = messageOf(err);
 		} finally {
 			addBusy = false;
@@ -134,13 +160,13 @@
 		}
 	}
 
-	let boughtCount = $derived(list.ticked.length);
-	let leftCount = $derived(list.pending.length);
+	let boughtCount = $derived(ticked.length);
+	let leftCount = $derived(pending.length);
 </script>
 
-<svelte:head><title>{list.store?.name ?? 'List'} · Zembil</title></svelte:head>
+<svelte:head><title>{store?.name ?? 'List'} · Zembil</title></svelte:head>
 
-<header data-color={list.store?.color}>
+<header data-color={store?.color}>
 	<a class="back" href="/" aria-label="Back to shops">
 		<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
 			<path
@@ -155,21 +181,21 @@
 	</a>
 	<div>
 		<p class="z-eyebrow">Shopping at</p>
-		<h1 class="z-title">{list.store?.name ?? ''}</h1>
+		<h1 class="z-title">{store?.name ?? ''}</h1>
 	</div>
 </header>
 
 <div class="body">
 	<Banner message={list.error} onretry={() => list.load()} />
 
-	{#if list.items.length === 0}
+	{#if items.length === 0}
 		<div class="empty">
 			<p class="z-card-title">The basket is empty</p>
 			<p class="z-meta">Add the first thing you need here.</p>
 		</div>
 	{:else}
 		<ul>
-			{#each list.pending as item (item.id)}
+			{#each pending as item (item.id)}
 				<li>
 					<ItemRow
 						{item}
@@ -181,10 +207,10 @@
 			{/each}
 		</ul>
 
-		{#if list.ticked.length > 0}
-			<p class="divider"><span>In the basket · {list.ticked.length}</span></p>
+		{#if ticked.length > 0}
+			<p class="divider"><span>In the basket · {ticked.length}</span></p>
 			<ul>
-				{#each list.ticked as item (item.id)}
+				{#each ticked as item (item.id)}
 					<li>
 						<ItemRow
 							{item}
@@ -209,7 +235,7 @@
 </div>
 
 <!-- Quick add. Stays open after each item. -->
-<Sheet open={adding} title="Add to {list.store?.name ?? 'this shop'}" onclose={() => (adding = false)}>
+<Sheet open={adding} title="Add to {store?.name ?? 'this shop'}" onclose={() => (adding = false)}>
 	<Banner message={addError} />
 	{#if justAdded}
 		<p class="added" role="status">Added “{justAdded}”. Next?</p>
@@ -237,7 +263,7 @@
 			bind:value={draftNote}
 		/>
 		<button class="z-btn" type="submit" disabled={addBusy || draftName.trim().length === 0}>
-			{addBusy ? 'Adding…' : `Add to ${list.store?.name ?? 'list'}`}
+			{addBusy ? 'Adding…' : `Add to ${store?.name ?? 'list'}`}
 		</button>
 	</form>
 </Sheet>
@@ -256,7 +282,7 @@
 			maxlength="500"
 			bind:value={editNote}
 		/>
-		<p class="z-meta">In {list.store?.name ?? ''}</p>
+		<p class="z-meta">In {store?.name ?? ''}</p>
 		<button class="z-btn" type="submit" disabled={editBusy || editName.trim().length === 0}>
 			{editBusy ? 'Saving…' : 'Save'}
 		</button>

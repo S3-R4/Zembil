@@ -14,7 +14,8 @@ const config = {
 			directives: {
 				'default-src': ['self'],
 				'script-src': ['self'],
-				'style-src': ['self'],
+				// See CONTRACT.md §5 / D-026: script-src stays strict, style-src does not.
+				'style-src': ['self', 'unsafe-inline'],
 				'img-src': ['self', 'data:'],
 				'font-src': ['self'],
 				'connect-src': ['self'],

@@ -39,3 +39,13 @@ today.
 | **Session list with per-device revocation** | `sessions.user_agent` is already captured for the account screen; "sign out everywhere" is the missing endpoint. |
 | **Structured request logging / metrics** | Currently level-based logs only. |
 | **Automated `VACUUM INTO` on a timer** | Backup is a documented manual script (D-013). A cron sidecar or host timer is the natural next step. |
+
+## Found while building M2–M5
+
+| Item | Why deferred / note |
+|---|---|
+| **Store rename, recolour, reorder and archive UI** | `PATCH /api/stores/{id}` implements all four and is tested, but no screen calls it. Archiving is the one that matters: R-14 promises un-archiving is reachable via `?includeArchived=true`, and today nothing can archive a store in the first place, so the promise is not yet load-bearing. A store-edit sheet on the list header is the natural home. |
+| **Theme flash for an explicit Light or Dark override** | `Appearance` is applied on mount, so a member who overrides their OS setting sees one frame of the other theme. Fixing it needs the choice available before first paint — an inline script (which `kit.csp` in hash mode will not admit from `app.html`) or a cookie read in the root `load`. The cookie is the honest fix; it was not worth a round trip's worth of complexity during M3. |
+| **Playwright on WebKit and Firefox** | The suite runs on Chromium because that is the only engine installed here, and the WebAuthn virtual authenticator is a Chrome DevTools Protocol feature with no cross-engine equivalent. Mobile Safari is the single most likely target for this app, so a WebKit run is the highest-value addition to the suite. |
+| **A real HTTPS passkey run** | Passkeys are verified over `http://localhost`, which is a secure context and exercises the identical code path. What is untested is a deployment where `ZEMBIL_RP_ID` does not match the host — a configuration failure the README warns about and nothing currently catches at startup beyond the suffix assertion. A boot-time self-check against the live origin could close it. |
+| **A reviewer pass over M2, M3 and M4** | Not deferred by choice: the reviewer agents terminated at the account's spend limit. Tracked in `PLAN.md` §5 M5 rather than here, because it is a milestone exit criterion and not a feature. |

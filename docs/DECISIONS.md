@@ -360,3 +360,104 @@ snapshot also doubles as readable documentation of the current schema.
 **Consequence.** Column types are restricted to `INT`, `INTEGER`, `REAL`, `TEXT`, `BLOB`, `ANY` —
 which the schema already satisfies. Editing a shipped migration in place becomes a CI failure rather
 than a production surprise.
+
+---
+
+## D-019 — `client_id` idempotency is scoped to the store and survives rollover
+
+**Decision.** The uniqueness index moves from `(trip_id, client_id)` to
+`(store_id, client_id) WHERE client_id IS NOT NULL AND state <> 'carried' AND deleted_at IS NULL`,
+carry-over **preserves** `client_id` instead of nulling it, and R-6 step 5 updates the original to
+`carried` **before** inserting the clone.
+
+**Rationale.** The original design was provably broken and it was reproduced by executing the DDL,
+not argued about: add an item, retry the add on a flaky connection, and let a rollover land between
+the two. The first request creates the item; the close clones it forward with `client_id=NULL`; the
+retry finds no `(trip_id, client_id)` match on the new trip and creates a second item. The family
+ends up with two of everything, permanently, and the one feature that exists specifically to prevent
+duplicates is the thing that caused them. Store scope is also the honest scope: the client's mental
+model is "I added this to Migros", not "I added this to Migros trip #7".
+
+**Consequence.** The partial predicate is what keeps the chain legal — a carried original and its
+live clone share a `client_id` but only one of them is inside the index. That makes statement order
+in close load-bearing rather than stylistic, which is why the contract now spells it out and a test
+asserts the constraint fires on the wrong order. A retry that crosses a close returns `200` with an
+item on a **later** trip than the caller asked about; the client must accept that.
+
+---
+
+## D-020 — `sort_order` is allocated by the server in gaps of 1000
+
+**Decision.** The server assigns `MAX(sort_order) + 1000` inside the write transaction. Clones inherit
+their original's value verbatim. Clients never send an item `sort_order`.
+
+**Rationale.** Nothing in the contract assigned this field, which left every agent free to invent an
+answer — the frontend could have sent it, the repository could have defaulted it to zero, and close
+could have reset it. Under the zero-default reading every carried item shares the key `(0, created_at)`
+with `created_at` set to the same `now`, so the list after a rollover would render in an order SQLite
+chose and reshuffle between refetches. Inheritance keeps the order the family last saw, which is the
+whole point of carry-over: the list should look like the list, one trip later.
+
+**Consequence.** `sort_order` is unique per trip (I-12) and the 1000-gap leaves room for a future
+drag-to-reorder to insert between neighbours without rewriting every row. R-13 gains an `id` tiebreak
+so the order is total even if that invariant is ever violated.
+
+---
+
+## D-021 — Realtime effects are enumerated per endpoint, not left to inference
+
+**Decision.** Contract §3.0 is a normative table naming, for every write, whether it bumps
+`stores.rev` and which event it emits. The SSE wire format is pinned to unnamed events with
+single-line JSON `data`, no `event:` name and no `id:`.
+
+**Rationale.** `stores.rev` and `store.changed` were specified only for close. Read literally, that
+means adding an item produced no event at all and every other phone kept showing a stale list until
+someone pulled to refresh — the multi-user requirement silently unimplemented, and unimplemented in a
+way that looks like a network flake rather than a bug. The wire format matters for the same reason:
+the data agent writing `event: store.changed` and the frontend agent writing `es.onmessage` produce
+code that compiles, passes both agents' own tests, and never delivers a single event. These two agents
+never see each other's files, so the wire is the only place the agreement can live.
+
+**Consequence.** The table is the acceptance criterion for the realtime tests. Idempotent no-ops
+(re-ticking, re-deleting, an idempotent add hit) explicitly emit nothing, so two phones racing to tick
+the same item generate one event, not two.
+
+---
+
+## D-022 — `ZEMBIL_RP_ID` is the full hostname, never the registrable domain
+
+**Decision.** The WebAuthn relying-party ID defaults to and is documented as the full hostname of
+`ZEMBIL_ORIGIN`. Startup warns loudly if it is configured as a proper suffix.
+
+**Rationale.** The earlier wording said "registrable domain", which is a real WebAuthn option and the
+wrong one here. rpID is a **scope**: a credential minted for `example.com` can be requested by any
+page under `*.example.com`. The deployment target is a home server that very likely runs other things
+on sibling subdomains, and any one of them — including anything with a stored-XSS hole — could then
+ask the browser for a Zembil passkey and be handed a valid assertion. It is also effectively
+irreversible: authenticators key credentials by rpID, so narrowing it later invalidates every passkey
+the family has registered.
+
+**Consequence.** Passkeys work only on the exact hostname. That is the intended behaviour for a
+single-origin app.
+
+---
+
+## D-023 — The `Origin` check is ours, and per-IP rate limits are deliberately loose
+
+**Decision.** The mutating-request `Origin` check lives in `hooks.server.ts` and runs for every method
+and every content type. SvelteKit's `kit.csrf.checkOrigin` stays on but is not the control. The per-IP
+login and passkey buckets rise to 300 per 15 minutes; the per-username bucket stays at 10.
+
+**Rationale.** Two separate near-misses with the same shape — a defence that appears present and is
+not. `checkOrigin` only inspects the three HTML form content types; Zembil speaks `application/json`
+exclusively, so relying on the framework would have left every mutation covered by nothing but
+`SameSite=Lax`. And the per-IP bucket, at 30 per 15 minutes, was sized as if each family member had
+their own address. They share one home WAN IP, and behind the reverse proxy they may all present that
+single value — so one person mistyping their password on the sofa could lock the rest of the household
+out of the shopping list. That is exactly the denial-of-service D-007 refuses to build, arriving
+through a different door.
+
+**Consequence.** Per-IP is now a coarse brake against a bot, and per-`username_key` is the real
+credential-stuffing control — the knob to tighten if abuse ever appears. `PROTOCOL_HEADER` and
+`HOST_HEADER` must stay unset (§6) so that nothing a client sends can influence what the app believes
+its own origin is.

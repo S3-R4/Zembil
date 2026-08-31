@@ -166,7 +166,11 @@ CREATE INDEX        trips_history            ON trips (store_id, seq DESC);
 --
 --   client_id makes POST /items idempotent under flaky cellular: a retried
 --   request with the same client_id returns the existing row instead of a
---   duplicate.
+--   duplicate. Scope is the STORE, not the trip, and it survives a rollover:
+--   a clone keeps the original's client_id and the original moves to 'carried',
+--   so at most one non-carried, non-deleted row per (store_id, client_id) is
+--   ever live. A trip-scoped index would let a retry that crossed a close
+--   create a permanent duplicate (the carried clone plus the retry).
 --
 --   store_id is denormalized from trips.store_id so the hot list query and the
 --   "all items ever at this store" analytics query never need a join. It is
@@ -207,7 +211,8 @@ CREATE TABLE items (
   -- a carried item must point at its clone; a non-carried item must not
   CHECK ((state = 'carried') = (carried_to_item_id IS NOT NULL))
 ) STRICT;
-CREATE UNIQUE INDEX items_client_id   ON items (trip_id, client_id) WHERE client_id IS NOT NULL;
+CREATE UNIQUE INDEX items_client_id   ON items (store_id, client_id)
+       WHERE client_id IS NOT NULL AND state <> 'carried' AND deleted_at IS NULL;
 CREATE INDEX items_list               ON items (trip_id, state, sort_order) WHERE deleted_at IS NULL;
 CREATE INDEX items_store_history      ON items (store_id, created_at);
 CREATE INDEX items_origin             ON items (origin_item_id);
@@ -263,6 +268,9 @@ Each of these is a testable assertion. The reviewer checks that a test exists fo
 | I-8 | A soft-deleted item (`deleted_at` non-NULL) is never carried and never appears in any list response. |
 | I-9 | `sessions.id` is never equal to any value that was ever sent to a client. |
 | I-10 | `users.password_hash` is never NULL — a passkey-only account must still have a fallback credential. |
+| I-11 | At most **one** live row (`state <> 'carried'`, `deleted_at IS NULL`) exists per `(store_id, client_id)`. Enforced by `items_client_id`. |
+| I-12 | Within one trip, `sort_order` is unique across non-deleted items. Allocation is `MAX+1000` per R-15, and nothing else writes it. |
+| I-13 | `stores.rev` is strictly increasing per store and is bumped by exactly the writes listed in §3.0. |
 
 ### 1.3 Password hash encoding
 
@@ -315,15 +323,22 @@ inside `BEGIN IMMEDIATE … COMMIT`, in this order:
 3. Set the trip `status='closed'`, `closed_at=now`, `closed_by=actor`.
 4. Insert the successor trip: same store, `seq = closed.seq + 1`, `status='open'`, `opened_at=now`.
    This must happen **after** step 3 or `trips_one_open_per_store` rejects the insert.
-5. For each non-deleted item in the closed trip with `state='pending'`, ordered by `sort_order, created_at`:
-   - insert a clone into the successor trip with a new `id`, the same `name`, `note`, `sort_order`
-     and `created_by` (the original author is preserved — carry-over is not authorship),
-     `state='pending'`, `client_id=NULL`, `carried_from_item_id = original.id`,
+5. For each non-deleted item in the closed trip with `state='pending'`, ordered by
+   `sort_order, created_at, id`, and **in this statement order**:
+   - generate the clone's `id` in application code first;
+   - update the original to `state='carried'`, `carried_to_item_id = <clone id>`, bump `version`;
+   - **then** insert the clone into the successor trip with the same `name`, `note`, `sort_order`,
+     `client_id` and `created_by` (the original author is preserved — carry-over is not
+     authorship), `state='pending'`, `carried_from_item_id = original.id`,
      `origin_item_id = original.origin_item_id`, `carry_count = original.carry_count + 1`,
-     `version=1`, `created_at=now`, `updated_at=now`;
-   - update the original to `state='carried'`, `carried_to_item_id = clone.id`, bump `version`.
+     `version=1`, `created_at=now`, `updated_at=now`.
+
+   The order is not stylistic. `client_id` is **carried, not nulled** — see I-11 and R-17 — so the
+   original must leave the index's partial predicate (by becoming `carried`) before the clone
+   enters it. Inserting first raises `SQLITE_CONSTRAINT` on `items_client_id`. Verified against
+   `node:sqlite` on this build.
 6. Bump `stores.rev`.
-7. `COMMIT`, then emit one `store.changed` event.
+7. `COMMIT`, then emit one `store.changed` event carrying the new `rev`.
 
 **R-7 — Ticked items never carry.** An item with `state='ticked'` when its trip closes stays exactly
 as it is, in the closed trip, forever. That is the purchase history.
@@ -347,7 +362,9 @@ Exactly one successor trip is ever created. Never two.
 committing after it lands on the successor trip per R-2. Both orderings are correct and neither
 loses the item.
 
-**R-13 — Ordering within a list.** Pending items sort by `sort_order ASC, created_at ASC`. Ticked
+**R-13 — Ordering within a list.** Pending items sort by `sort_order ASC, created_at ASC, id ASC`.
+The `id` tiebreak is mandatory: without a total order, two rows sharing a key render in whatever
+order SQLite happens to return and the list visibly reshuffles between refetches. Ticked
 items sort **below all pending items**, by `ticked_at DESC` — most recently ticked at the top of the
 ticked group, so undo is always reachable near the boundary. `carried` items never appear in an open
 list.
@@ -355,6 +372,35 @@ list.
 **R-14 — Archiving a store.** Sets `archived_at`. The open trip is left open and untouched. An
 archived store is hidden from the store list and rejects writes with `409 STORE_ARCHIVED`.
 Un-archiving restores it intact. Stores are never hard-deleted; that would cascade away history.
+
+**R-15 — `sort_order` allocation.** `sort_order` is assigned by the server and never by the client.
+
+- A new item: `sort_order = COALESCE(MAX(sort_order), 0) + 1000` over **all** rows (deleted included)
+  of the target trip, computed inside the same write transaction as the insert.
+- A clone in R-6 step 5: **inherits** the original's `sort_order` verbatim. The successor trip is
+  empty at that moment, so the inherited values are already distinct and carry-over preserves the
+  list order the family last saw. Adds after the close continue from `MAX+1000` and therefore land
+  below every carried item.
+- A new store: `sort_order = COALESCE(MAX(sort_order), 0) + 1000` over all stores, archived included.
+- `PATCH /api/stores/{storeId}` with `sortOrder` writes the client-supplied integer directly; the
+  store list is small and hand-ordered. Items have no reorder endpoint in the MVP.
+
+The 1000 gap is headroom for a future drag-to-reorder that inserts between two neighbours without
+rewriting the whole list.
+
+**R-16 — `stores.rev` is the revalidation cursor.** `rev` starts at 0 and is bumped by exactly one on
+each committed write that changes what `GET /api/stores/{storeId}/list` would return. §3.0 is the
+authoritative list. It is bumped **inside** the write transaction; the event announcing it is emitted
+**after** commit. A client that has already fetched `rev >= event.rev` skips the refetch.
+
+**R-17 — Idempotent add survives a rollover.** `POST /api/stores/{storeId}/items` resolves `clientId`
+against the **store**, not the trip:
+`WHERE store_id = ? AND client_id = ? AND state <> 'carried' AND deleted_at IS NULL`. A retry whose
+original committed before a close therefore resolves to the **clone on the successor trip** and
+returns `200` with it, rather than creating a second item. If the match is absent because the item was
+deleted in the meantime, the retry creates a fresh item; that is a double fault (retry plus a delete
+in the gap) whose worst outcome is one extra item, and it is preferred over resurrecting something the
+user explicitly removed.
 
 ---
 
@@ -366,6 +412,46 @@ page is not an authorization check.
 
 All mutating requests (`POST`, `PATCH`, `DELETE`) additionally require a valid `Origin` header
 matching `ZEMBIL_ORIGIN`. A missing `Origin` on a mutation is **rejected**, never allowed through.
+
+This check is implemented **in `hooks.server.ts`, for every mutating method and every content type**,
+and it is the control. SvelteKit's built-in `kit.csrf.checkOrigin` is left enabled but must not be
+relied on: it only inspects requests whose `Content-Type` is one of the three form types
+(`application/x-www-form-urlencoded`, `multipart/form-data`, `text/plain`). Zembil's API is
+`application/json`, which that check ignores entirely — a same-site-lax cookie plus a JSON POST from
+another origin would otherwise be uncovered. Both layers must exist; only ours is load-bearing.
+
+### 3.0 Write effects — `rev` bumps and events
+
+Normative. A write not listed here bumps nothing and emits nothing. Every listed effect happens
+**after** the transaction commits, exactly once, even when the endpoint returned an idempotent no-op
+response — see the last column. An endpoint that returns `200` because nothing actually changed
+(R-4, R-5, R-10 idempotent repeats) must **not** bump `rev` and must **not** emit.
+
+| Endpoint | Bumps | Emits | Notes |
+|---|---|---|---|
+| `POST /api/stores` | — | `stores.changed` | New store; there is no prior `rev` to bump. |
+| `PATCH /api/stores/{id}` (name, color, sortOrder, archived) | `stores.rev` | `stores.changed` **and** `store.changed` | The header on the list screen shows the name and colour. |
+| `POST /api/stores/{id}/items` (**new** row) | `stores.rev` | `store.changed` | |
+| `POST /api/stores/{id}/items` (idempotent hit, R-17) | — | — | Nothing changed. |
+| `PATCH /api/items/{id}` | `stores.rev` | `store.changed` | |
+| `DELETE /api/items/{id}` (first delete) | `stores.rev` | `store.changed` | |
+| `DELETE /api/items/{id}` (already deleted) | — | — | |
+| `POST /api/items/{id}/tick` (state changed) | `stores.rev` | `store.changed` | |
+| `POST /api/items/{id}/tick` (already ticked, R-4) | — | — | |
+| `POST /api/items/{id}/untick` (state changed) | `stores.rev` | `store.changed` | |
+| `POST /api/items/{id}/untick` (already pending, R-5) | — | — | |
+| `POST /api/stores/{id}/trips/close` | `stores.rev` | `store.changed` **and** `stores.changed` | The home screen's counts and `openTripId` both change. |
+| `POST /api/admin/users` | — | — | No shopping state changed. |
+| `PATCH /api/admin/users/{id}` with `isActive:false` | — | `session.revoked` **to that user's streams only** | Then the streams are closed. |
+| `POST /api/admin/users/{id}/reset-password` | — | `session.revoked` to that user's streams only | |
+| `POST /api/auth/logout` | — | — | The client already knows. |
+
+`store.changed` always carries the post-commit `stores.rev`. The two store-level events are separate
+because they invalidate different screens: `stores.changed` invalidates the home list, `store.changed`
+invalidates one store's item list. A close emits both.
+
+Rows in this table are the acceptance criteria for the realtime tests. The frontend agent may assume
+nothing beyond it.
 
 ### 3.1 Error envelope
 
@@ -499,9 +585,13 @@ action there is to un-archive.
 items already ordered per **R-13**. Never includes soft-deleted or `carried` items.
 
 **`POST /api/stores/{storeId}/items`** — request `{ "name": string, "note"?: string, "clientId": string }`.
-`clientId` is a client-generated UUID and is **required**: a retry after a timeout on flaky cellular
-must not create a duplicate. If `(trip_id, client_id)` already exists, return `200` with the existing
-item instead of `201`. `201 → { "item": Item }`. `409 STORE_ARCHIVED` if archived.
+`clientId` is a client-generated UUID (v4, lowercase, with dashes) and is **required**: a retry after
+a timeout on flaky cellular must not create a duplicate. The lookup is **store-scoped and
+rollover-safe** per R-17 — `store_id = ? AND client_id = ? AND state <> 'carried' AND deleted_at IS
+NULL`. On a hit, return `200` with that item (which may live on a **later** trip than the caller
+expected) instead of `201`. `201 → { "item": Item }`. The client generates one `clientId` per compose,
+reuses it across every retry of that compose, and generates a fresh one only for a new item.
+`409 STORE_ARCHIVED` if archived. `sort_order` is assigned per R-15.
 
 **`POST /api/items/{itemId}/tick`** and **`/untick`** — request body `{}`. `200 → { "item": Item }`.
 Idempotent per R-4 and R-5. `409 TRIP_CLOSED` if the item's trip is closed. `404 ITEM_NOT_FOUND`
@@ -534,9 +624,16 @@ In-process token buckets, keyed independently and both checked:
 | Bucket | Key | Limit |
 |---|---|---|
 | Password login | `username_key` | 10 per 15 min |
-| Password login | client IP | 30 per 15 min |
-| Passkey assertion | client IP | 30 per 15 min |
+| Password login | client IP | 300 per 15 min |
+| Passkey assertion | client IP | 300 per 15 min |
 | Admin user creation | actor `user_id` | 20 per hour |
+
+The per-IP limits are deliberately loose. **The whole family shares one home WAN IP**, and behind the
+reverse proxy every request may present that single address; a tight per-IP bucket would let one
+member's fat-fingered morning lock out everyone else — reintroducing by the back door exactly the
+denial-of-service that "no account lockout" exists to prevent. Per-IP is a coarse brake on a bot
+hammering the endpoint, nothing more. **The per-`username_key` bucket is the real credential-stuffing
+control**, and it is the one to tighten if abuse ever appears.
 
 Exceeding a bucket returns `429 RATE_LIMITED` with a `Retry-After` header. There is deliberately **no
 account lockout**: a lockout on a family app is a denial-of-service any anonymous visitor can inflict
@@ -565,6 +662,26 @@ type ZembilEvent =
   | { v: 1; type: 'stores.changed' }                    // a store was created, renamed or archived
   | { v: 1; type: 'session.revoked' }                   // this session specifically; client logs out
 ```
+
+**Wire format — normative.** Every event is an **unnamed** (default `message`) event whose `data` is
+the JSON object above on a **single line**, so the client uses `es.onmessage` and never
+`addEventListener('store.changed', …)`. No `event:` field is sent. No `id:` field is sent, so the
+browser never replays `Last-Event-ID`; recovery is by refetch, which is the whole point of hints.
+One blank line terminates each event. On the wire:
+
+```
+data: {"v":1,"type":"store.changed","storeId":"0f1c…","rev":42}
+
+: ping
+
+data: {"v":1,"type":"stores.changed"}
+
+```
+
+The client dispatches on the parsed `type`. An event with an unrecognised `type`, or with `v !== 1`,
+is **ignored silently** — that is the forward-compatibility hinge, and a client that throws on an
+unknown type cannot be upgraded without a flag day. On connect the server sends nothing; the client
+does a full fetch on mount regardless.
 
 - A `:ping` comment every 25 seconds keeps intermediaries from timing the connection out.
 - The client tracks the last `rev` it fetched per store and skips a refetch when
@@ -622,7 +739,7 @@ break. HSTS is set by the reverse proxy and documented in the README, not by the
 | Name | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `ZEMBIL_ORIGIN` | URL | **yes** | — | e.g. `https://zembil.example.com`. Drives CSRF origin checks and WebAuthn `expectedOrigin`. Startup fails if unset or unparseable. |
-| `ZEMBIL_RP_ID` | hostname | no | hostname of `ZEMBIL_ORIGIN` | WebAuthn relying-party ID. Registrable domain, no scheme, no port. |
+| `ZEMBIL_RP_ID` | hostname | no | **full hostname** of `ZEMBIL_ORIGIN` | WebAuthn relying-party ID. See the note below — this is the **full hostname**, not the registrable domain. |
 | `ZEMBIL_RP_NAME` | string | no | `Zembil` | Shown in the OS passkey prompt. |
 | `ZEMBIL_DATA_DIR` | path | no | `/data` | Holds `zembil.db` and its `-wal`/`-shm` sidecars. |
 | `PORT` | int | no | `3000` | |
@@ -633,6 +750,21 @@ break. HSTS is set by the reverse proxy and documented in the README, not by the
 | `ZEMBIL_SESSION_IDLE_DAYS` | int | no | `30` | |
 | `ZEMBIL_SESSION_ABSOLUTE_DAYS` | int | no | `180` | |
 | `ZEMBIL_LOG_LEVEL` | enum | no | `info` | `debug\|info\|warn\|error` |
+
+**`ZEMBIL_RP_ID` must be the full hostname** (`zembil.example.com`), never the registrable domain
+(`example.com`). An rpID is a scope, and a credential scoped to `example.com` may be requested by
+**any** page under `*.example.com`. On a home server that also hosts other services on sibling
+subdomains, the registrable-domain form hands every one of them the ability to log in as a family
+member. It is also a one-way door: changing rpID later invalidates every existing passkey, because
+the authenticator keys them by rpID. Startup asserts that `ZEMBIL_RP_ID` is either exactly the
+hostname of `ZEMBIL_ORIGIN` or a suffix of it, and **warns loudly** if it is a proper suffix.
+
+**`PROTOCOL_HEADER` and `HOST_HEADER` must not be set.** These are `@sveltejs/adapter-node`
+variables that make it derive `event.url` from `X-Forwarded-Proto` / `X-Forwarded-Host`. Zembil never
+needs them: the origin check compares against `ZEMBIL_ORIGIN`, a constant, and WebAuthn's
+`expectedOrigin` and `expectedRPID` come from that same constant. Setting them would let a client
+that reaches the app directly control what the app believes its own origin is. The compose file must
+not define them and the README must say so.
 
 There is **no application secret key**. Sessions are opaque random tokens stored hashed, so nothing
 needs signing — one less secret to provision, rotate, or leak.

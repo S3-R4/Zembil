@@ -16,6 +16,7 @@
  * and one static offline page.
  */
 import { build, files, version } from '$service-worker';
+import { cacheStrategy } from '$lib/client/cache-policy';
 
 const CACHE = `zembil-${version}`;
 const OFFLINE = '/offline.html';
@@ -53,21 +54,22 @@ sw.addEventListener('activate', (event) => {
 sw.addEventListener('fetch', (event) => {
 	const request = event.request;
 
-	// Only GET is ever cacheable, and a request that opted out of the HTTP cache
-	// has opted out of this one too.
-	if (request.method !== 'GET') return;
+	// The whole policy lives in `cacheStrategy`, which is unit-tested against the
+	// paths that matter. This handler only carries it out.
+	const strategy = cacheStrategy({
+		method: request.method,
+		url: request.url,
+		origin: sw.location.origin,
+		mode: request.mode,
+		precache: PRECACHE
+	});
 
-	const url = new URL(request.url);
-	if (url.origin !== sw.location.origin) return;
-
-	// THE RULE. Never touch the API — not the list, not /api/me, not the SSE
-	// stream. Every one of these is per-member and most are per-second.
-	if (url.pathname.startsWith('/api/')) return;
+	if (strategy === 'bypass') return;
 
 	// A navigation returns an SSR'd, signed-in document. Network only, always.
 	// On failure the member gets a static page that contains nothing about them,
 	// rather than a stale list belonging to whoever used this browser last.
-	if (request.mode === 'navigate') {
+	if (strategy === 'navigate') {
 		event.respondWith(
 			(async () => {
 				try {
@@ -84,12 +86,9 @@ sw.addEventListener('fetch', (event) => {
 		return;
 	}
 
-	// Everything left is a precached asset: hashed JS and CSS, fonts, icons.
-	// Cache-first is safe precisely because the build assets are content-hashed —
-	// a new version has a new URL, so a stale hit is impossible rather than
-	// merely unlikely.
-	if (!PRECACHE.includes(url.pathname)) return;
-
+	// 'asset': a precached, content-hashed build file or a static file. Cache
+	// first is safe precisely because those URLs are content-hashed — a new build
+	// has a new URL, so a stale hit is impossible rather than merely unlikely.
 	event.respondWith(
 		(async () => {
 			const cached = await caches.match(request);

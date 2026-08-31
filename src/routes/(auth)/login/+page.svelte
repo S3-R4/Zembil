@@ -8,6 +8,7 @@
 	import { page } from '$app/state';
 	import { api, ApiError, OfflineError } from '$lib/client/api';
 	import { messageOf } from '$lib/client/app.svelte';
+	import { safeNext } from '$lib/client/redirect';
 	import Banner from '$lib/components/Banner.svelte';
 
 	let username = $state('');
@@ -24,13 +25,10 @@
 			typeof navigator.credentials?.get === 'function';
 	});
 
-	function next(): string {
-		const target = page.url.searchParams.get('next');
-		// Only a same-site path is honoured. An absolute URL here would make the
-		// sign-in screen an open redirect for anyone who can get a member to open
-		// a link.
-		return target && target.startsWith('/') && !target.startsWith('//') ? target : '/';
-	}
+	// Only a same-site path is honoured. An absolute URL here would make the
+	// sign-in screen an open redirect for anyone who can get a member to open a
+	// link — `safeNext` is where that rule and its tests live.
+	const next = () => safeNext(page.url.searchParams.get('next'));
 
 	async function afterSignIn(mustChangePassword: boolean) {
 		await invalidateAll();

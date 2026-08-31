@@ -25,6 +25,37 @@ export interface RealtimeHandlers {
 	revalidate(): void;
 }
 
+/**
+ * Parses one `data:` line into an event, or `null` for anything this client
+ * should ignore.
+ *
+ * The forward-compatibility hinge (§4): an unrecognised `type` or a future `v`
+ * is ignored in silence. A client that throws here cannot be upgraded without a
+ * flag day, because every old phone in the house would start erroring the
+ * moment the server learned a new event.
+ */
+export function parseEvent(data: unknown): ZembilEvent | null {
+	if (typeof data !== 'string') return null;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(data);
+	} catch {
+		return null;
+	}
+	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+	const event = parsed as Partial<ZembilEvent>;
+	if (event.v !== 1) return null;
+	if (event.type === 'store.changed') {
+		const candidate = event as Extract<ZembilEvent, { type: 'store.changed' }>;
+		if (typeof candidate.storeId !== 'string' || typeof candidate.rev !== 'number') return null;
+		return candidate;
+	}
+	if (event.type === 'stores.changed' || event.type === 'session.revoked') {
+		return event as ZembilEvent;
+	}
+	return null;
+}
+
 export function connectRealtime(handlers: RealtimeHandlers): () => void {
 	if (typeof EventSource === 'undefined') return () => {};
 
@@ -36,16 +67,8 @@ export function connectRealtime(handlers: RealtimeHandlers): () => void {
 	// dispatches on the parsed `type`; there is no addEventListener per type,
 	// because the server sends no `event:` field.
 	source.addEventListener('message', (event) => {
-		let parsed: ZembilEvent;
-		try {
-			parsed = JSON.parse((event as MessageEvent<string>).data);
-		} catch {
-			return;
-		}
-		// The forward-compatibility hinge: an unrecognised type or a future `v` is
-		// ignored in silence. A client that throws here cannot be upgraded without
-		// a flag day.
-		if (!parsed || parsed.v !== 1) return;
+		const parsed = parseEvent((event as MessageEvent<string>).data);
+		if (!parsed) return;
 		switch (parsed.type) {
 			case 'store.changed':
 				handlers.storeChanged(parsed.storeId, parsed.rev);
@@ -55,8 +78,6 @@ export function connectRealtime(handlers: RealtimeHandlers): () => void {
 				return;
 			case 'session.revoked':
 				handlers.sessionRevoked();
-				return;
-			default:
 				return;
 		}
 	});

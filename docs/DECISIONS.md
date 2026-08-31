@@ -810,3 +810,38 @@ base-image manifest, `/data` ownership) and the agent that wrote them terminated
 before running anything. Two of the three happened to be right. Written-in-the-past-tense
 verification is not verification, and this is the second time in this project that a confidently
 worded comment has been the thing that was wrong — see D-030.
+
+---
+
+## D-035 — M3's mutation sweep, and pulling two rules out of places a test cannot reach
+
+**Decision.** The service worker's caching rule and the sign-in screen's `next=` handling are now
+`src/lib/client/cache-policy.ts` and `src/lib/client/redirect.ts` — plain functions with no browser
+in the way — and the SSE client's wire parsing is `parseEvent`. Twenty-one mutations were applied
+across M3's guards; nineteen died first time, and the two survivors were test gaps that are now
+closed.
+
+**Rationale.** M3's most dangerous rule was inside a service worker, which is reachable only through
+a real browser and a real cache. The Playwright spec that covers it is worth having and is kept, but
+it can only assert what a browser happened to request during the run; it cannot ask what happens to
+`/offline.html/../api/me`, a `HEAD`, a cross-origin URL, or an unparseable one. Those are exactly the
+inputs that turn "we never cache the API" into "we never cached the API during the test".
+
+The two survivors, and what each one taught:
+
+- **Precache membership matched by prefix.** The mutation swapped `includes` for
+  `some(p => pathname.startsWith(p))` and the suite stayed green, because both of the paths the test
+  probed (`/_app/`, `/fonts/`) are *shorter* than the precached entries — the direction a prefix
+  check gets right by accident. The dangerous direction is longer: `/offline.html.map`,
+  `/offline.html/anything`. Now tested.
+- **The `createdAt` tiebreak in R-13.** The test's item ids ran in the same order as their
+  timestamps, so the `id` tiebreak alone produced the expected answer and the `createdAt` comparison
+  could be deleted with nothing noticing. The ids now run backwards against the timestamps, which is
+  the only arrangement that can tell the two comparisons apart.
+
+Both are the same failure the M1 audits kept producing and D-030 was written for: a guard that is
+correct, commented, and covered by a test that cannot reach it. The second one is the more
+instructive, because the test looked *more* thorough for having chosen tidy ascending ids.
+
+**Consequence.** 350 unit tests and 10 Playwright specs. The service worker keeps its browser-level
+test — the unit tests prove the rule, and the spec proves the worker actually applies it.

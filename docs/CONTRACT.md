@@ -624,6 +624,18 @@ the assertion is rejected as a possible clone.
 `user.id` is the account's `webauthn_user_handle`, base64url-encoded — never the username, never a
 sequential integer. `excludeCredentials` lists the user's existing credentials.
 
+**Registration options are pinned, never left to the library's defaults.**
+`generateRegistrationOptions` is called with
+`authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' }`.
+`@simplewebauthn/server` v13 defaults `residentKey` to `'preferred'`, under which an authenticator
+is free to create a **non-discoverable** credential. The registration then succeeds, the account
+screen shows the new passkey, and the usernameless login flow above — which sends an empty
+`allowCredentials` — can never find it. The member has a passkey that verifiably exists and cannot
+log them in. `'required'` makes the authenticator refuse at registration time instead, which is a
+visible failure rather than a silent one. `userVerification` stays `'preferred'`: this deployment
+has a password fallback and fewer than ten known users, and `'required'` locks out authenticators
+with no UV capability for no gain here.
+
 **`POST /api/auth/passkey/register/verify`**
 Request `{ "challengeId": string, "response": RegistrationResponseJSON, "label": string }`.
 `201` → `{ "passkey": Passkey }`. `label` is 1–64 characters.

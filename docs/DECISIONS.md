@@ -600,3 +600,39 @@ name suggests, so the comment in `+server.ts` must not claim one. Probes 1 and 2
 the `PLAN.md` §7 known gaps: adapter-node needs no explicit flush call, and disconnects do not leak
 bus subscriptions. Buffering at the **reverse proxy** is a separate risk and remains M4's problem —
 `proxy_buffering off` for the events endpoint belongs in the deployment notes.
+
+---
+
+## D-029 — The `@simplewebauthn` v13 API surface is pinned from the shipped types, not from recall
+
+**Decision.** M2 builds against the v13.3.3 signatures below, and `docs/CONTRACT.md` §3.2 now pins
+`authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' }` rather than
+accepting the library defaults.
+
+**Rationale.** Read out of `node_modules/@simplewebauthn/server/esm/**/*.d.ts` — this API changed
+materially across v9, v10, v11 and v13, and `PLAN.md` §7 flagged recall as untrustworthy here. What
+the installed version actually says:
+
+| | v13.3.3 |
+| --- | --- |
+| `verifyRegistrationResponse` → | `registrationInfo.credential: { id: Base64URLString, publicKey: Uint8Array, counter, transports? }` |
+| | **not** the flat `credentialID` / `credentialPublicKey` / `counter` of v9–v10 |
+| `verifyAuthenticationResponse` takes | `credential: WebAuthnCredential` (**not** `authenticator:`) |
+| | and `expectedRPID` is **required**, not optional |
+| `generateRegistrationOptions` takes | `userID?: Uint8Array`, `userName`, `rpName`, `rpID` |
+| `verifyAuthenticationResponse` → | `authenticationInfo.newCounter` |
+
+The trap worth naming: the JSDoc block above `VerifiedRegistrationResponse` still documents the old
+flat shape (`registrationInfo.credentialPublicKey`, `registrationInfo.credentialID`) while the type
+underneath it returns the nested `credential` object. Anyone reading the comment rather than the type
+writes code that compiles against `any` and fails at runtime.
+
+The §1.1 `credentials` DDL needs no change: `id TEXT` matches `Base64URLString`, `public_key BLOB`
+matches `Uint8Array`, and `users.webauthn_user_handle` as a 32-byte BLOB matches `userID`.
+
+**Consequence.** Closes `PLAN.md` §7 probe 1. The `residentKey` ruling is the load-bearing part: under
+the library default of `'preferred'`, an authenticator may create a non-discoverable credential, the
+registration succeeds, the account screen lists the passkey, and the usernameless login flow — which
+sends an empty `allowCredentials` by design (§3.2) — can never find it. The member ends up with a
+passkey that exists and cannot log them in. `'required'` converts that into a visible refusal at
+registration time.

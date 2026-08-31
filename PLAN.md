@@ -185,8 +185,12 @@ finished; the judge panel and synthesis never ran. Decisions marked **[unjudged]
 D-011 (SSE) and D-012 (Docker). Three probes that were meant to verify assumptions empirically were
 cancelled, so the implementing agents must verify these themselves rather than trust recall:
 
-1. **`@simplewebauthn` v13's exact API** — read the shipped `.d.ts` files; this API changed
-   materially across v9, v10, v11 and v13.
+1. ~~**`@simplewebauthn` v13's exact API** — read the shipped `.d.ts` files; this API changed
+   materially across v9, v10, v11 and v13.~~
+   **Closed 2026-08-31.** Read out of the installed v13.3.3 types and pinned in D-029. The nested
+   `registrationInfo.credential` shape, the `credential:` (not `authenticator:`) parameter and the
+   now-required `expectedRPID` are all recorded there, as is the `residentKey: 'required'` ruling
+   that keeps usernameless login working. The §1.1 `credentials` DDL needed no change.
 2. ~~**SSE through `adapter-node`** — confirm nothing compresses or buffers `text/event-stream`.~~
    **Closed 2026-08-31.** Probed against `setResponse` on Node 26.1.0: chunks flush as enqueued (no
    explicit flush call needed), and a client disconnect fires the stream's `cancel`, so bus

@@ -163,7 +163,7 @@ restore, and admin password recovery.
 **Exit:** on a clean state, `docker compose up` yields a working app with a bootstrapped admin;
 a backup taken while serving is restored successfully and verified; image size reported.
 
-### M5 — Hardening *(in progress)*
+### M5 — Hardening *(complete)*
 Act on every accumulated reviewer finding. Full-suite green. Final end-to-end pass against the
 "done means" checklist.
 
@@ -178,11 +178,12 @@ D-036 and D-037 together record why the reviewer is not a formality: it finds th
 mutation sweep provably cannot, because a sweep can only break code that exists, and it is the only
 pass in this process not run by whoever wrote the code.
 
-**Done-means checklist**, from the brief. Verified 2026-08-31 unless stated.
+**Done-means checklist**, from the brief. Re-verified end to end on **2026-09-01** against a freshly
+built image, after the M2 audit fixes landed — not carried over from the 08-31 run.
 
 | Clause | State |
 |---|---|
-| Clean-machine `docker compose up` brings it up with a bootstrapped admin | ✅ verified on an empty volume: healthy, password logged once, login works |
+| Clean-machine `docker compose up` brings it up with a bootstrapped admin | ✅ empty volume → healthy in 8s, the one-time password banner in the logs, login works, `must_change_password` enforced, password change and normal use afterwards. Image 62 MB. |
 | Documented volume for data | ✅ `zembil_data`, README "Data and backups" |
 | Documented first-admin bootstrap | ✅ README, `.env.example`, CONTRACT.md §3.8 |
 | Password login | ✅ unit + e2e |
@@ -191,8 +192,10 @@ pass in this process not run by whoever wrote the code.
 | Tick, un-tick and carry-over covered by tests | ✅ unit (M1) + e2e |
 | Usable one-handed on a 390px phone | ✅ e2e asserts the 44px floor on every visible control and that the primary action sits below two-thirds of the viewport |
 | README covers deploy, reverse proxy, backup and restore | ✅ including the `proxy_buffering off` that SSE needs |
+| A backup taken while serving restores and verifies | ✅ live `backup.sh` (integrity_check=ok, 1 account) → a store added → `restore.sh` → container healthy again and the added store gone, the backed-up one present. Plus `tests/deploy/scripts.test.ts`, 7 tests. |
+| The M2 audit's bypass cannot be reached through the shipped container | ✅ every path from the audit — `/%61pi/stores`, `/%61pi/admin/users` GET and POST, `/ap%69/admin/users` — is `403` through compose, with login and normal use unaffected (D-037) |
 
-Measured, since the brief asked for it: **4 taps from cold open to an item added**, and **2 taps for
+Measured, since the brief asked for it: **3 taps from cold open to an item added**, and **2 taps for
 every item after that** — the quick-add sheet stays open. Both are pinned by
 `tests/e2e/taps.spec.js`, so a regression that adds a step fails the suite rather than being
 noticed a month later.

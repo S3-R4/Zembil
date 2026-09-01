@@ -163,12 +163,14 @@ a backup taken while serving is restored successfully and verified; image size r
 Act on every accumulated reviewer finding. Full-suite green. Final end-to-end pass against the
 "done means" checklist.
 
-**Reviewer status — the honest version.** M1 was audited three times and its findings are closed.
-The M2 and M4 reviewer runs have not happened: both agents terminated on their first request at the
-account's monthly spend limit. Their absence is a real gap in this milestone, not a formality —
-D-030 and D-034 both exist because something written confidently turned out to be wrong, and the
-reviewer is the only pass in this process that is not written by whoever wrote the code. They are
-re-run before M5 is called done.
+**Reviewer status — the honest version.** M1 was audited three times, and M3 and M4 once each;
+all of their findings are closed (D-036). **M2 has still never been audited.** Three attempts were
+made: the first two agents terminated on their first request at the account's monthly spend limit,
+and the third was stopped before it reported. That is a real gap in this milestone, not a formality
+— M2 is the security-critical one, the app is reachable from the public internet, and the reviewer
+is the only pass in this process not written by whoever wrote the code. D-036 records that the
+audits found a class of defect the mutation sweep provably cannot: a missing guard rather than a
+weak one. **M5 is not signed off until the M2 audit has run and its findings are closed.**
 
 **Done-means checklist**, from the brief. Verified 2026-08-31 unless stated.
 

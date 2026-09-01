@@ -256,7 +256,35 @@ export async function verifyRegistration(
 
 export const passkeyLabel = (value: unknown) => requiredText(value, 'Label', 64);
 
+/**
+ * `credentials.id` is a TEXT PRIMARY KEY, and with `attestationType: 'none'`
+ * (D-029) the registration response is unattested — the caller names the
+ * credential id. Naming one that already exists used to surface the constraint
+ * violation as `500 INTERNAL`. It was never a takeover (no UPSERT; the existing
+ * row keeps its owner) and the ids carry too much entropy to be an existence
+ * oracle worth having, but §3.1a's rule is that a constraint is never what
+ * rejects user input.
+ */
 export function insertCredential(
+	db: Db,
+	userId: string,
+	credential: RegisteredCredential,
+	label: string
+): void {
+	try {
+		insertCredentialRow(db, userId, credential, label);
+	} catch (err) {
+		// node:sqlite reports the EXTENDED result code in `errcode`; the low byte
+		// of SQLITE_CONSTRAINT is 19 (§1.1a, and the same idiom as R-6's test).
+		const code = (err as { errcode?: number }).errcode;
+		if (typeof code === 'number' && (code & 0xff) === 19) {
+			throw new DomainError('CREDENTIAL_EXISTS', 409, 'That passkey is already registered.');
+		}
+		throw err;
+	}
+}
+
+function insertCredentialRow(
 	db: Db,
 	userId: string,
 	credential: RegisteredCredential,

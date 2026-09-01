@@ -29,11 +29,23 @@ export const HEALTH_PATH = '/api/health';
  * carries no family data and has to render for the change-password screen to
  * exist at all — blocking it would lock the member out of the one action that
  * clears the flag. Every route that returns data is under `/api/`.
+ *
+ * Matched against `event.route.id`, not the request path — see `createHandle`
+ * for why. Every entry here is a static route, so its id and its path are the
+ * same string.
+ *
+ * The public endpoints are listed too. §3.2 makes login public, and a flagged
+ * session presenting itself at `/api/auth/login` was being told to change a
+ * password before it could sign in. Exempting them is safe because the flag is
+ * re-read from `users` on every request, so signing in again cannot clear it.
  */
 export const PASSWORD_GATE_EXEMPT: ReadonlySet<string> = new Set([
 	'/api/me',
 	'/api/auth/password',
 	'/api/auth/logout',
+	'/api/auth/login',
+	'/api/auth/passkey/login/options',
+	'/api/auth/passkey/login/verify',
 	HEALTH_PATH
 ]);
 
@@ -58,7 +70,11 @@ export const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
 
 export function applySecurityHeaders(response: Response, authenticated: boolean): Response {
 	for (const [name, value] of SECURITY_HEADERS) response.headers.set(name, value);
-	if (authenticated) {
+	// `authenticated` is computed from the INCOMING session, so the login
+	// response — the one carrying the member's name and the Set-Cookie — was
+	// leaving without `no-store`. A response that hands out a session is an
+	// authenticated response by any reading that matters.
+	if (authenticated || response.headers.has('set-cookie')) {
 		// §5: EVERY response to an authenticated request, HTML and JSON alike. The
 		// app ships a service worker, and a list carrying family members' names
 		// must never reach a shared or intermediary cache.
@@ -118,11 +134,22 @@ export function createHandle(db: Db, config: AuthConfig): Handle {
 		// Enforced server-side, not by the client. Without this the temporary
 		// password an admin hands out over a chat app stays valid for the full
 		// 180-day absolute session TTL as soon as the member dismisses the prompt.
+		//
+		// Matched on `event.route.id`, NOT on `event.url.pathname`. SvelteKit
+		// leaves `pathname` percent-encoded and routes on a decoded copy, so
+		// `/%61pi/admin/users` does not start with `/api/` and still reaches the
+		// admin endpoint. An audit confirmed that against the production build:
+		// a bootstrapped admin who had never changed the password could read the
+		// account list and create another admin through one encoded character.
+		// `route.id` is the matched pattern, already canonical and already
+		// decoded. It is null only when nothing matched, and then there is no
+		// endpoint to protect — the path fallback keeps the shape of the check.
+		const routeId = event.route?.id ?? path;
 		if (
 			authenticated &&
 			event.locals.user?.mustChangePassword &&
-			path.startsWith('/api/') &&
-			!PASSWORD_GATE_EXEMPT.has(path)
+			routeId.startsWith('/api/') &&
+			!PASSWORD_GATE_EXEMPT.has(routeId)
 		) {
 			return applySecurityHeaders(
 				errorResponse(

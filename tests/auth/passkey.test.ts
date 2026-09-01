@@ -126,6 +126,27 @@ describe('registration verify (§3.2)', () => {
 		expect(JSON.parse(row.transports)).toContain('internal');
 	});
 
+	it('answers 409 for a credential id already registered, not 500', async () => {
+		// With attestationType 'none' (D-029) the response is unattested, so the
+		// caller names the id. `credentials.id` is a TEXT PRIMARY KEY and the
+		// violation used to escape as INTERNAL — §3.1a says a constraint is never
+		// what rejects user input. Ownership is unaffected either way: there is no
+		// UPSERT, so the original row keeps its user.
+		const device = new SoftAuthenticator({ rpId: TEST_RP_ID, origin: TEST_ORIGIN });
+		expect((await registerPasskey(device, 'iPhone')).response.status).toBe(201);
+
+		const again = await registerPasskey(device, 'iPhone again');
+		expect(again.response.status).toBe(409);
+		expect((await bodyOf(again.response)).error.code).toBe('CREDENTIAL_EXISTS');
+
+		// One row, still owned by the original account, still with its first label.
+		const rows = h.db.prepare('SELECT * FROM credentials WHERE id = ?')
+			.all(device.credentialId.toString('base64url')) as any[];
+		expect(rows).toHaveLength(1);
+		expect(rows[0].user_id).toBe(ayse.id);
+		expect(rows[0].device_label).toBe('iPhone');
+	});
+
 	it('shows up on GET /api/me', async () => {
 		await registerPasskey();
 		const body = await bodyOf(await meRoute(routeEvent({ method: 'GET', path: '/api/me', ...asAyse() }) as any));
@@ -419,6 +440,58 @@ describe('DELETE /api/auth/passkey/{credentialId} (§3.2)', () => {
 			params: { credentialId: 'anything' }
 		}) as any);
 		expect(response.status).toBe(401);
+	});
+});
+
+describe('the §3.7 buckets these routes actually consult', () => {
+	// `login/options` was the only passkey bucket any test reached through a
+	// route. An audit deleted the `enforce(...)` line from `login/verify` and
+	// from `register/options` and all 170 auth tests stayed green — D-030's
+	// failure mode, twice, on two public-facing brakes.
+	//
+	// Drained through the limiter rather than by 300 real ceremonies: each of
+	// those is an ECDSA verification. If these keys stopped matching what the
+	// routes compute, the assertions below fail loudly rather than silently
+	// passing.
+	const drain = (limiter: { reset: () => void; consume: (k: string) => number | null }) => {
+		limiter.reset();
+		for (let i = 0; i < 300; i++) {
+			expect(limiter.consume('198.51.100.7'), `drain ${i}`).toBeNull();
+		}
+	};
+
+	it('brakes login/verify on the assertion bucket', async () => {
+		drain(limiters.passkeyAssertionByIp);
+		const limited = await loginVerify(routeEvent({
+			path: '/api/auth/passkey/login/verify',
+			body: { challengeId: 'whatever', response: {} }
+		}) as any);
+		expect(limited.status).toBe(429);
+		expect((await bodyOf(limited)).error.code).toBe('RATE_LIMITED');
+		expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0);
+	});
+
+	it('brakes register/options on the options bucket, session or no session', async () => {
+		// Authenticated, and still braked: this endpoint writes a challenge row,
+		// so a signed-in member looping on it is a way to grow the table.
+		drain(limiters.passkeyOptionsByIp);
+		const limited = await registerOptions(routeEvent({
+			path: '/api/auth/passkey/register/options',
+			...asAyse()
+		}) as any);
+		expect(limited.status).toBe(429);
+		expect((await bodyOf(limited)).error.code).toBe('RATE_LIMITED');
+		expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0);
+	});
+
+	it('keys them by address, so one flooding client cannot lock the family out', async () => {
+		drain(limiters.passkeyOptionsByIp);
+		const elsewhere = await registerOptions(routeEvent({
+			path: '/api/auth/passkey/register/options',
+			address: '203.0.113.9',
+			...asAyse()
+		}) as any);
+		expect(elsewhere.status).toBe(200);
 	});
 });
 

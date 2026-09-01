@@ -94,3 +94,38 @@ describe('clientIp — the §3.7 worked example, which is normative', () => {
 		expect(clientIp(headers(''), '10.0.0.1', 1)).toBe('10.0.0.1');
 	});
 });
+
+describe('the bucket map is bounded, not merely swept (§3.7)', () => {
+	it('stops growing under a flood of distinct keys that never refill', () => {
+		// The sweep drops only buckets that have refilled to full. A flood of
+		// DISTINCT keys — usernames are attacker-chosen — leaves every bucket
+		// partially drained and therefore un-sweepable, so the map grew past
+		// maxKeys without bound. The per-IP brake made that a slow leak rather
+		// than a hole, but this process runs for months.
+		const limiter = new RateLimiter(10, 15 * 60_000, 100);
+		const at = 1_000_000;
+		for (let i = 0; i < 5_000; i++) {
+			// Same instant every time: nothing refills, so the sweep frees nothing.
+			limiter.consume(`user-${i}`, at);
+		}
+		expect(limiter.size).toBeLessThanOrEqual(100);
+	});
+
+	it('still frees by refill first, so a quiet key is forgotten rather than evicted', () => {
+		const limiter = new RateLimiter(10, 1_000, 4);
+		for (let i = 0; i < 4; i++) limiter.consume(`old-${i}`, 0);
+		// A full window later every one of those has refilled to full.
+		limiter.consume('new-key', 10_000);
+		expect(limiter.size).toBe(1);
+	});
+
+	it('evicts the least recently touched, so the busiest key keeps its bucket', () => {
+		const limiter = new RateLimiter(10, 15 * 60_000, 10);
+		for (let i = 0; i < 10; i++) limiter.consume(`old-${i}`, 1_000 + i);
+		// Touched last, so it must survive the eviction the next new key triggers.
+		limiter.consume('old-0', 9_000);
+		limiter.consume('trigger', 9_001);
+		expect(limiter.consume('old-0', 9_002)).toBeNull();
+		expect(limiter.size).toBeLessThanOrEqual(10);
+	});
+});

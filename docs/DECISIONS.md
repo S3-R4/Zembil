@@ -945,3 +945,88 @@ target, sheets share a `.z-panel`, and the skeleton keeps its background under r
 the M4 audit") was made with `git add -A` and swept in the first batch of M3 client-state fixes —
 the generation guard, `revalidateAll`, `seed`'s staleness refusal, `loadApi`, `+error.svelte` — under
 an M4 message. The M3 work is in two commits, not one.
+
+---
+
+## D-037 — The M2 audit: a named control that did not hold
+
+**Decision.** M2, the only milestone never independently audited and the security-critical one, was
+finally reviewed. It found one blocking defect and eleven smaller ones. All but one are fixed; the
+exception is recorded in `BACKLOG.md` with its reasoning.
+
+### The blocking one: the password gate was bypassable by encoding a single character
+
+`hooks` gated `must_change_password` on `event.url.pathname`, which SvelteKit leaves
+**percent-encoded**, while SvelteKit itself routes on a **decoded** copy. So `/%61pi/admin/users`
+does not start with `/api/` — and still reaches `/api/admin/users`.
+
+Confirmed against the production build, before and after. Before, from a session belonging to a
+bootstrapped admin that had never changed its password:
+
+```
+GET  /api/stores          403 PASSWORD_CHANGE_REQUIRED
+GET  /%61pi/stores        200
+GET  /%61pi/admin/users   200   the full account list
+POST /%61pi/admin/users   201   {"temporaryPassword":"…"} — a second admin
+```
+
+After: every one of those is `403`, and `POST /api/auth/login`, the password change, and normal
+authenticated use are unaffected. §3.2 justifies this gate at length — *"the temporary password an
+admin hands out over a chat app stays valid for the full 180-day absolute session TTL as soon as the
+member dismisses the prompt"* — which is exactly what it did, for anyone who encoded one letter.
+
+The fix is to match on `event.route.id`: the pattern SvelteKit actually resolved, already decoded and
+already canonical. The general lesson is worth stating plainly, because it will recur: **a security
+decision must be made on the value the framework routed with, never on a value the client controls
+the spelling of.** `url.pathname` is client-controlled text; `route.id` is the framework's own answer.
+
+The exempt set now also lists the public endpoints. A flagged session hitting `/api/auth/login` was
+being told to change its password before it could sign in — harmless today because the client
+redirects first, and a trap for the next person.
+
+### The other one that mattered: six guards no test could reach
+
+D-030 exists for this and D-033 made mutation testing an exit criterion, and M2 shipped anyway with
+six protections that could be removed or weakened while all 371 tests stayed green:
+
+| Guard | Mutation that stayed green |
+|---|---|
+| per-IP login limit | delete `enforce(limiters.loginByIp, …)` |
+| passkey assertion limit | delete `enforce(limiters.passkeyAssertionByIp, …)` |
+| passkey options limit | delete `enforce(limiters.passkeyOptionsByIp, …)` |
+| constant-time compare | `timingSafeEqual(a, b)` → `a.toString('hex') === b.toString('hex')` |
+| session token entropy | `randomBytes(32)` → `randomBytes(4)` |
+| temporary-password CSPRNG | `randomInt(n)` → `Math.floor(Math.random() * n)` |
+
+Every one is now killed by a test, and each kill was verified by applying the mutation and watching
+it fail. Three of them needed a kind of test this project had not written before. The last three are
+*functionally identical* to the correct code — a timing side channel, a shorter secret that still
+hashes to 64 hex characters, a predictable stream that satisfies every assertion about length and
+alphabet. No assertion on a return value can see any of them. `tests/auth/crypto-primitives.test.ts`
+therefore asserts **which primitive was called**, with `node:crypto` mocked in that file alone and
+every real implementation kept.
+
+That is a genuine extension of D-033. A property can be real, load-bearing, and invisible to every
+black-box test that could ever be written for it; the only honest test is then a structural one.
+Reaching for a spy is usually a smell, and here it is the correct tool — the alternative is a
+comment claiming the code is constant-time and nothing checking.
+
+### The rest
+
+Fixed: the recovery script now destroys the sessions of the account it resets, matching §3.3 and the
+HTTP path it mirrors — it is run precisely when somebody may hold a session they should not; §3.1a's
+username charset is enforced against the lowercased form, so a Cyrillic `а` can no longer produce an
+account an admin cannot tell from another over the phone; a duplicate credential id is `409` rather
+than `500`; the login response carries `no-store`, which it did not because `authenticated` is read
+from the *incoming* session; the rate limiter evicts its least recently touched tenth when a sweep
+frees nothing, so a flood of distinct attacker-chosen keys can no longer grow the map without bound;
+and `requireSessionId` keeps its unreachable check with a comment saying why a test would be
+meaningless — it narrows a type by refusing to launder a null, and costs one comparison.
+
+Deferred, in `BACKLOG.md`: concurrent double login leaves one orphan session.
+
+**Consequence.** 391 tests. The reviewer verdict is in the session record verbatim. Worth recording
+alongside D-036: that entry argued the reviewer catches what execution cannot, and this milestone is
+the sharpest case — every one of these findings sat under a green suite, and the blocking one sat
+under a green suite in the milestone this project treats as its most security-sensitive. The three
+sweeps run before it were all run by whoever wrote the code, on the code they had just written.

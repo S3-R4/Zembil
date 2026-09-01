@@ -181,6 +181,32 @@ describe('POST /api/auth/login (§3.2)', () => {
 	});
 });
 
+describe('caching the response that hands out a session (§5)', () => {
+	it('marks the login response no-store, though the request arrived unauthenticated', async () => {
+		const { createHandle } = await import('$lib/server/auth/handle');
+		const { getConfig } = await import('$lib/server/auth/config');
+		const handle = createHandle(h.db, getConfig());
+
+		const cookies = fakeCookies();
+		const event = loginEvent({ username: 'ayse', password: 'correct-horse-battery' }, { cookies });
+		const response = await handle({
+			event: event as any,
+			resolve: async () => {
+				const inner = await login(event as any);
+				// What the adapter does: the cookies the endpoint set become headers.
+				inner.headers.append('set-cookie', `${cookieName()}=${cookies.get(cookieName())}; Path=/`);
+				return inner;
+			}
+		} as any);
+
+		// The body carries the member's username and display name, and the header
+		// carries the session itself. `authenticated` is computed from the INCOMING
+		// session, which for a login is none — so this used to go out cacheable.
+		expect(response.status).toBe(200);
+		expect(response.headers.get('Cache-Control')).toBe('no-store');
+	});
+});
+
 describe('login rate limiting (§3.7)', () => {
 	it('returns 429 with Retry-After after 10 attempts on one username', async () => {
 		for (let i = 0; i < 10; i++) {
@@ -199,6 +225,38 @@ describe('login rate limiting (§3.7)', () => {
 		}
 		const limited = await login(loginEvent({ username: 'AySe', password: 'nope-nope-nope' }) as any);
 		expect(limited.status).toBe(429);
+	});
+
+	it('brakes on the per-IP bucket too, not only the per-username one', async () => {
+		// The per-IP bucket is what stops credential stuffing: one source address
+		// walking a list of usernames never trips the per-username limit, because
+		// each username gets its own fresh 10. Nothing exercised this call site —
+		// an audit deleted `enforce(limiters.loginByIp, …)` from the route and all
+		// 170 auth tests stayed green.
+		//
+		// Drained through the limiter rather than by 300 real logins: each of
+		// those runs a full scrypt (N=65536) whether the account exists or not,
+		// which is the point of §1.3 and half a minute of test time. If the key
+		// below stopped matching what the route computes, this fails loudly.
+		limiters.loginByIp.reset();
+		limiters.loginByUsername.reset();
+		for (let i = 0; i < 300; i++) {
+			expect(limiters.loginByIp.consume('198.51.100.7'), `drain ${i}`).toBeNull();
+		}
+
+		// A username that has never been tried, so its own bucket is untouched.
+		const limited = await login(loginEvent({ username: 'someone-new', password: 'nope-nope-nope' }) as any);
+		expect(limited.status).toBe(429);
+		expect((await bodyOf(limited)).error.code).toBe('RATE_LIMITED');
+		expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0);
+
+		// And it is keyed on the address, so one flooding client cannot lock the
+		// rest of the family out.
+		const elsewhere = await login(loginEvent(
+			{ username: 'ayse', password: 'correct-horse-battery' },
+			{ address: '203.0.113.9' }
+		) as any);
+		expect(elsewhere.status).toBe(200);
 	});
 
 	it('does not let one member exhaust another member\'s bucket', async () => {

@@ -61,14 +61,38 @@ export class RateLimiter {
 		return null;
 	}
 
-	/** Drops every bucket that has refilled to full — it is indistinguishable
-	 *  from a key that was never seen, so forgetting it changes nothing. */
+	/**
+	 * Drops every bucket that has refilled to full — it is indistinguishable
+	 * from a key that was never seen, so forgetting it changes nothing.
+	 *
+	 * That alone can free nothing. Keys here are usernames and IP addresses,
+	 * both attacker-chosen: a flood of *distinct* keys leaves every bucket
+	 * partially drained and therefore un-sweepable, and the map grows past
+	 * `maxKeys` unbounded. The per-IP bucket makes that a slow leak rather than
+	 * a hole — 300 attempts per address per 15 minutes — but "slow" is not
+	 * "bounded", and this process is meant to run for months.
+	 *
+	 * So when the sweep frees nothing, evict the least recently touched tenth.
+	 * Evicting a partially-drained bucket forgives whoever owned it, which is
+	 * why it is the fallback and not the policy: the entries chosen are the ones
+	 * idle longest, which are the closest to refilling anyway.
+	 */
 	private sweep(now: number): void {
 		for (const [key, bucket] of this.buckets) {
 			if (bucket.tokens + (now - bucket.updatedAt) * this.rate >= this.limit) {
 				this.buckets.delete(key);
 			}
 		}
+		if (this.buckets.size < this.maxKeys) return;
+
+		const byAge = [...this.buckets].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+		const evict = Math.max(1, Math.ceil(byAge.length / 10));
+		for (let i = 0; i < evict; i++) this.buckets.delete(byAge[i][0]);
+	}
+
+	/** Test seam: the number of distinct keys currently held. */
+	get size(): number {
+		return this.buckets.size;
 	}
 
 	/** Test seam. */

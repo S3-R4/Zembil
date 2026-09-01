@@ -113,6 +113,12 @@ export async function bootstrapAdmin(db, username, password) {
 				        must_change_password = 1, updated_at = ?
 				  WHERE id = ?`
 			).run(hash, ts, existing.id);
+			// Every existing session for this account goes with the password, in
+			// the same transaction — matching §3.3 and the HTTP reset path. This
+			// script is the recovery path, run in exactly the case where somebody
+			// may hold a session they should not; leaving those alive would hand
+			// back the account while the intruder keeps their cookie.
+			db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existing.id);
 		} else {
 			db.prepare(
 				`INSERT INTO users (id, username, username_key, display_name, password_hash,

@@ -189,9 +189,9 @@ describe('must_change_password (§3.2)', () => {
 		h.db.prepare('UPDATE users SET must_change_password = 1 WHERE id = ?').run(ayse.id);
 	});
 
-	const withFlag = (method: string, path: string) => {
+	const withFlag = (method: string, path: string, routeId?: string) => {
 		const session = signIn(h.db, ayse.id);
-		return run({ method, path, cookies: cookiesWithSession(session.token) });
+		return run({ method, path, routeId, cookies: cookiesWithSession(session.token) });
 	};
 
 	it('blocks every other API endpoint with 403 PASSWORD_CHANGE_REQUIRED', async () => {
@@ -205,6 +205,49 @@ describe('must_change_password (§3.2)', () => {
 			const response = await withFlag(method, path);
 			expect(response.status, path).toBe(403);
 			expect((await bodyOf(response)).error.code, path).toBe('PASSWORD_CHANGE_REQUIRED');
+		}
+	});
+
+	it('blocks an endpoint reached through a percent-encoded path', async () => {
+		// The gate used to read `event.url.pathname`, which SvelteKit leaves
+		// encoded, while routing on a decoded copy. `/%61pi/admin/users` does not
+		// start with `/api/` and still reaches `/api/admin/users` — an audit
+		// confirmed against the production build that a bootstrapped admin who
+		// had never changed the password could read the account list and create
+		// another admin this way. Every case above uses an already-canonical
+		// literal path, so none of them could see it.
+		for (const [method, path, routeId] of [
+			['GET', '/%61pi/stores', '/api/stores'],
+			['GET', '/%61pi/admin/users', '/api/admin/users'],
+			['POST', '/%61pi/admin/users', '/api/admin/users'],
+			['GET', '/ap%69/stores', '/api/stores'],
+			['GET', '/api/stores/%61bc/list', '/api/stores/[storeId]/list']
+		] as const) {
+			const response = await withFlag(method, path, routeId);
+			expect(response.status, path).toBe(403);
+			expect((await bodyOf(response)).error.code, path).toBe('PASSWORD_CHANGE_REQUIRED');
+		}
+	});
+
+	it('blocks a parameterised route, whose id is never its path', async () => {
+		// `route.id` carries `[itemId]`, not the value. A gate that compared the
+		// id against the exempt set would be fine, but one that assumed id and
+		// path are interchangeable would not — pin the distinction.
+		const response = await withFlag('POST', '/api/items/xyz/tick', '/api/items/[itemId]/tick');
+		expect(response.status).toBe(403);
+	});
+
+	it('does not block the public endpoints, which cannot clear or use the flag', async () => {
+		// §3.2 makes these public. A flagged session presenting itself at
+		// /api/auth/login was being told to change its password before it could
+		// sign in. Safe to exempt: the flag is re-read from `users` on every
+		// request, so signing in again cannot clear it.
+		for (const [method, path] of [
+			['POST', '/api/auth/login'],
+			['POST', '/api/auth/passkey/login/options'],
+			['POST', '/api/auth/passkey/login/verify']
+		] as const) {
+			expect((await withFlag(method, path)).status, path).toBe(200);
 		}
 	});
 

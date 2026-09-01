@@ -17,7 +17,7 @@ import {
 	parseArgs,
 	usernameKey as scriptUsernameKey
 } from '../../scripts/bootstrap-admin.js';
-import { authHarness, bodyOf, routeEvent, seedUser, type AuthHarness } from './_support';
+import { authHarness, bodyOf, routeEvent, seedUser, signIn, type AuthHarness } from './_support';
 
 let h: AuthHarness;
 beforeEach(() => {
@@ -112,5 +112,34 @@ describe('parseArgs', () => {
 	it('refuses an empty username and an unknown flag', () => {
 		expect(() => parseArgs(['--username', '  '])).toThrow(/cannot be empty/);
 		expect(() => parseArgs(['--wat'])).toThrow(/Unknown argument/);
+	});
+});
+
+describe('recovery destroys the sessions it is recovering from (§3.3)', () => {
+	it('signs out every existing session for the account it resets', async () => {
+		const ayse = await seedUser(h.db, { username: 'baba', password: 'correct-horse-battery' });
+		const stolen = signIn(h.db, ayse.id);
+		const alsoStolen = signIn(h.db, ayse.id);
+
+		await bootstrapAdmin(h.db, 'baba', 'a-recovery-password');
+
+		// The HTTP reset path destroys sessions, per §3.3, because a reset issued
+		// when a device was lost must not leave that device signed in. This script
+		// is run in precisely that situation and used not to.
+		const { resolveSession } = await import('$lib/server/auth/session');
+		expect(resolveSession(h.db, stolen.token)).toBeNull();
+		expect(resolveSession(h.db, alsoStolen.token)).toBeNull();
+	});
+
+	it('leaves other members signed in', async () => {
+		const ayse = await seedUser(h.db, { username: 'baba', password: 'correct-horse-battery' });
+		const mehmet = await seedUser(h.db, { username: 'mehmet', password: 'correct-horse-battery' });
+		const theirs = signIn(h.db, mehmet.id);
+
+		await bootstrapAdmin(h.db, 'baba', 'a-recovery-password');
+
+		const { resolveSession } = await import('$lib/server/auth/session');
+		expect(resolveSession(h.db, theirs.token)?.user.id).toBe(mehmet.id);
+		expect(ayse.id).not.toBe(mehmet.id);
 	});
 });

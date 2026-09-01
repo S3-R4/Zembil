@@ -132,6 +132,36 @@ describe('POST /api/admin/users (§3.3)', () => {
 		}
 	});
 
+	it('enforces the §3.1a username charset, not only its length', async () => {
+		// The charset half of the rule was unenforced: any Unicode string was
+		// accepted. Not an auth hole — `username_key` is UNIQUE and normalized
+		// identically on both paths, so two spellings cannot collide onto one
+		// account — but a username is what an admin reads back to a member, and
+		// these make two accounts indistinguishable to a person.
+		for (const username of [
+			'ayşe',
+			'аyse', // Cyrillic а
+			'ok user',
+			'ok@user',
+			'ok/user',
+			'ok\u202euser'
+		]) {
+			const response = await create({ username, displayName: 'X', isAdmin: false });
+			expect(response.status, JSON.stringify(username)).toBe(400);
+			expect((await bodyOf(response)).error.code).toBe('VALIDATION_FAILED');
+		}
+	});
+
+	it('checks the charset against the lowercased form, so normal capitals are fine', async () => {
+		const response = await create({ username: 'Ayse.Yilmaz-1_x', displayName: 'Ayşe', isAdmin: false });
+		expect(response.status).toBe(201);
+		// Stored as typed; the key is the lowercased form (§1.1).
+		const body = await bodyOf(response);
+		expect(body.user.username).toBe('Ayse.Yilmaz-1_x');
+		// The display name is unrestricted — it is the human-facing field.
+		expect(body.user.displayName).toBe('Ayşe');
+	});
+
 	it('rate-limits creation to 20 per hour per acting admin (§3.7)', async () => {
 		limiters.adminUserCreateByActor.reset();
 		for (let i = 0; i < 20; i++) {

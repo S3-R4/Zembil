@@ -13,6 +13,16 @@ export function requireSession(locals: App.Locals): User {
 	return user;
 }
 
+/**
+ * Deliberately unreachable, and staying. `handle` never sets `locals.user`
+ * without `locals.sessionId` — they are written together from one
+ * `resolveSession` result — and every caller here runs `requireSession` first,
+ * so an audit could replace the one call site with `locals.sessionId as string`
+ * and leave the suite green. That is not a test to write: a test would only
+ * assert the impossible input this rejects. It is a narrowing from
+ * `string | null` to `string` that refuses to launder the null instead of
+ * casting it away, and it costs one comparison.
+ */
 export function requireSessionId(locals: App.Locals): string {
 	const sessionId = locals.sessionId;
 	if (!sessionId) throw new DomainError('UNAUTHENTICATED', 401, 'Please sign in.');

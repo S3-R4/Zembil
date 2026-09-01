@@ -203,6 +203,14 @@ export interface EventOptions {
 	params?: Record<string, string>;
 	address?: string;
 	headers?: Record<string, string>;
+	/**
+	 * The matched route pattern, when it differs from the request path — a
+	 * percent-encoded path, or a parameterised route. SvelteKit decodes before
+	 * matching, so these two are NOT the same string in general, and the
+	 * `must_change_password` gate was bypassable precisely because the code
+	 * assumed they were. Pass `null` for a request that matched no route.
+	 */
+	routeId?: string | null;
 }
 
 export function routeEvent(options: EventOptions = {}): any {
@@ -228,7 +236,7 @@ export function routeEvent(options: EventOptions = {}): any {
 		cookies: options.cookies ?? fakeCookies(),
 		params: options.params ?? {},
 		getClientAddress: () => options.address ?? '198.51.100.7',
-		route: { id: path },
+		route: { id: options.routeId !== undefined ? options.routeId : path },
 		setHeaders: () => {},
 		isDataRequest: false,
 		isSubRequest: false,

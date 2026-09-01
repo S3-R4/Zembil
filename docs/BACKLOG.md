@@ -58,3 +58,10 @@ today.
 | **`ZEMBIL_LOG_LEVEL` actually filtering** | It is parsed and validated at startup (`config.ts`) and nothing reads it. `.env.example` and `README.md` now say so plainly rather than describing behaviour that does not exist. A `log(level, …)` helper used by the non-critical call sites is an hour's work; the bootstrap banner must stay unconditional at `warn`. |
 | **`pre-restore-<stamp>/` retention** | Each restore roughly doubles the volume's size and nothing removes the old ones. Deliberate — they are the undo — but the README now documents cleaning them up, and a `--keep N` flag on `restore.sh` would be better than a documented `rm -rf`. |
 | **Store-edit UI** | Already listed above; the M3 audit independently reached the same conclusion about R-14's un-archive promise. |
+
+## Found by the M2 audit
+
+| Item | Why deferred / note |
+|---|---|
+| **Concurrent double login leaves one orphan session** | Two logins racing on the same browser both read the same `locals.sessionId`, both destroy it, and both create a row; the cookie keeps whichever wrote last and the other lives out its idle TTL. Not a race in the SQLite sense — everything after `await authenticatePassword` is synchronous on one connection — but it is a read-then-write on stale state. Deferred rather than patched because the honest fix is to destroy sessions by `(user_id, created_before)` or to make login idempotent per request, and both are more invasive than a bounded, same-user, same-browser leftover justifies. Everything else the audit found is fixed; this is the one thing it found that is not. |
+| **A boot-time self-check that `ZEMBIL_RP_ID` matches the live origin** | Already listed under M2–M5 as "a real HTTPS passkey run"; the M2 audit reached it from the other direction. |

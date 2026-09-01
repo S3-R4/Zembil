@@ -183,8 +183,32 @@ export function validatePassword(value: unknown): string {
 	return value;
 }
 
-/** §1.1: usernames are 1–32 characters after trim; display names 1–60. */
-export const validateUsername = (value: unknown) => requiredText(value, 'Username', 32);
+/**
+ * §3.1a: `trim; 1–32; [a-z0-9._-]+ after lowercasing`. The charset half of that
+ * rule was not enforced — any Unicode string was accepted. That is not an auth
+ * hole (`usernameKey` NFKC-normalizes and lowercases identically at creation
+ * and at lookup, and `users.username_key` is UNIQUE, so two spellings cannot
+ * land on one account) but it is drift, and it is the kind that becomes a hole
+ * later: a username is what an admin reads back to a member over the phone, and
+ * a right-to-left override or a Cyrillic 'а' makes two accounts indisplayable
+ * from each other.
+ *
+ * Checked against the LOWERCASED form, as the contract says, so `Ayse` is
+ * accepted and stored as typed while `username_key` stays in the charset.
+ */
+const USERNAME_CHARSET = /^[a-z0-9._-]+$/;
+
+export const validateUsername = (value: unknown) => {
+	const trimmed = requiredText(value, 'Username', 32);
+	if (!USERNAME_CHARSET.test(usernameKey(trimmed))) {
+		throw new DomainError(
+			'VALIDATION_FAILED',
+			400,
+			'Username can use only letters, digits, dots, dashes and underscores.'
+		);
+	}
+	return trimmed;
+};
 export const validateDisplayName = (value: unknown) => requiredText(value, 'Display name', 60);
 
 export function countActiveAdmins(db: Db): number {

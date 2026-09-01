@@ -141,6 +141,10 @@ login, first-admin bootstrap.
   session rotation, idle and absolute expiry, origin rejection, rate limiting, admin routes rejected
   for a non-admin session, `LAST_ADMIN` guard, passkey register and login, bootstrap idempotency.
 - A test asserts login timing does not distinguish a known from an unknown username.
+- Audited 2026-09-01 (D-037). The blocking finding — the `must_change_password` gate bypassable by
+  percent-encoding one character of the path — is fixed and verified against the production build,
+  and the six guards the audit found unreachable by any test are each pinned by a test whose kill
+  was confirmed by applying the mutation.
 
 ### M3 — Frontend — `zembil-frontend` *(complete)*
 Design tokens, layout shell with bottom navigation, login and passkey screens, store list, item list
@@ -163,14 +167,16 @@ a backup taken while serving is restored successfully and verified; image size r
 Act on every accumulated reviewer finding. Full-suite green. Final end-to-end pass against the
 "done means" checklist.
 
-**Reviewer status — the honest version.** M1 was audited three times, and M3 and M4 once each;
-all of their findings are closed (D-036). **M2 has still never been audited.** Three attempts were
-made: the first two agents terminated on their first request at the account's monthly spend limit,
-and the third was stopped before it reported. That is a real gap in this milestone, not a formality
-— M2 is the security-critical one, the app is reachable from the public internet, and the reviewer
-is the only pass in this process not written by whoever wrote the code. D-036 records that the
-audits found a class of defect the mutation sweep provably cannot: a missing guard rather than a
-weak one. **M5 is not signed off until the M2 audit has run and its findings are closed.**
+**Reviewer status.** Every milestone has now been audited: M1 three times, M2, M3 and M4 once each.
+M2 took four attempts — two agents terminated at the account's monthly spend limit and one was
+stopped before it reported — and it was worth the wait: it found an authorization bypass in the
+milestone this project treats as its most security-sensitive, under a fully green suite (D-037).
+Every blocking finding across all four milestones is closed. The one non-blocking finding not fixed
+is in `docs/BACKLOG.md` with its reasoning.
+
+D-036 and D-037 together record why the reviewer is not a formality: it finds the class of defect a
+mutation sweep provably cannot, because a sweep can only break code that exists, and it is the only
+pass in this process not run by whoever wrote the code.
 
 **Done-means checklist**, from the brief. Verified 2026-08-31 unless stated.
 

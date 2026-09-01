@@ -30,7 +30,8 @@ test('cold open to item added, counted', async ({ page }) => {
 	await page.goto('/');
 	await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible();
 
-	await tap(page.getByRole('link', { name: /Migros/ }).first());
+	// Straight from the home screen: the canvas puts "Add an item" in the primary
+	// slot here, not "Add a shop", and this is what that is worth.
 	await tap(page.getByRole('button', { name: 'Add an item' }));
 	// The name field is autofocused, so reaching it costs nothing — but count the
 	// tap anyway rather than flatter the number.
@@ -40,10 +41,9 @@ test('cold open to item added, counted', async ({ page }) => {
 	await expect(page.getByText('Added “Yumurta”')).toBeVisible();
 
 	console.log(`\n  Cold open to item added: ${taps} taps.\n`);
-	// Four is the target the design's "adding is the most frequent action" is
-	// built around: open store, open sheet, type, add. A regression that adds a
-	// confirmation step or a store picker should fail here, loudly.
-	expect(taps).toBeLessThanOrEqual(4);
+	// Three: open the sheet, type, add. A regression that reintroduces a store
+	// hop, or adds a confirmation step, should fail here and loudly.
+	expect(taps).toBeLessThanOrEqual(3);
 
 	// And the second item costs two, because the sheet stayed open.
 	let second = 0;

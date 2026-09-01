@@ -142,7 +142,7 @@
 <div class="body">
 	<Banner message={error} />
 
-	<section class="z-card">
+	<section class="z-panel">
 		<h2 class="z-card-title">Passkeys</h2>
 		<p class="z-meta">Sign in with your face, fingerprint or device PIN instead of a password.</p>
 		{#if passkeys.length === 0}
@@ -171,7 +171,7 @@
 		{/if}
 	</section>
 
-	<section class="z-card">
+	<section class="z-panel">
 		<h2 class="z-card-title">Appearance</h2>
 		<div class="segmented" role="group" aria-label="Appearance">
 			{#each ['light', 'auto', 'dark'] as const as option (option)}

@@ -917,3 +917,31 @@ load-bearing"; it is useless at "is there a guard missing here", because it can 
 exists. Those are different questions and the project needs both. The reviewer is not a formality at
 the end of a milestone, and running the milestones without it — which is what the spend limit forced
 for most of a day — produced exactly the class of defect it exists to catch.
+
+### M3, second pass: an untested guard turned out to be an unreached one
+
+The audit's ninth finding was filed as a coverage gap — "`safeNext` is thoroughly tested as a
+function, but nothing tests that login *calls* it. Replace `next()` with
+`page.url.searchParams.get('next')` and the suite is green with an open redirect." Writing the
+missing test found a live defect rather than the absence of one: **the `next=` mechanism was inert
+entirely.** `await invalidateAll(); await goto(next())` re-runs the `(auth)` layout load with the
+new session in place, and that load redirects a signed-in visitor away from `/login` — so the
+redirect always won and every `next` target, safe or not, was discarded. It went unnoticed because
+home is where the app sends you anyway. Now: `goto(target, { replaceState: true, invalidateAll: true
+})`, and `tests/e2e/session.spec.js` drives a real sign-in with `?next=` and asserts where the
+browser lands.
+
+That is a sharper version of the same lesson: D-030's "correct guard, test that cannot reach it" has
+a worse sibling, the correct guard nothing reaches *at runtime either*. Only a test that exercises
+the caller can tell the two apart.
+
+The rest of the audit's findings were design drift against `docs/DESIGN.md` and the canvas, and are
+closed with it: `.z-title` renders in the display face, the Shops screen's primary action is **Add
+an item** rather than "Add a shop" (which cost a tap on the most frequent action in the app — the
+cold-open path is now 3 taps to the first item, and 2 per item after), the account avatar is a 48px
+target, sheets share a `.z-panel`, and the skeleton keeps its background under reduced motion.
+
+**A commit-hygiene note, recorded because the history is otherwise misleading.** `489eab1` ("Act on
+the M4 audit") was made with `git add -A` and swept in the first batch of M3 client-state fixes —
+the generation guard, `revalidateAll`, `seed`'s staleness refusal, `loadApi`, `+error.svelte` — under
+an M4 message. The M3 work is in two commits, not one.

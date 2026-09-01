@@ -4,7 +4,7 @@
   remembers you" is worthless on the phone that does not.
 -->
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError, OfflineError } from '$lib/client/api';
 	import { messageOf } from '$lib/client/app.svelte';
@@ -31,8 +31,15 @@
 	const next = () => safeNext(page.url.searchParams.get('next'));
 
 	async function afterSignIn(mustChangePassword: boolean) {
-		await invalidateAll();
-		await goto(mustChangePassword ? '/password' : next(), { replaceState: true });
+		// `goto(..., { invalidateAll: true })`, NOT `invalidateAll()` then `goto`.
+		// Invalidating first re-runs this group's layout load with the new session
+		// in place, and that load redirects a signed-in visitor away from /login —
+		// so the redirect wins the race and `next` is silently ignored, for every
+		// target, safe or not.
+		await goto(mustChangePassword ? '/password' : next(), {
+			replaceState: true,
+			invalidateAll: true
+		});
 	}
 
 	async function signIn(event: SubmitEvent) {

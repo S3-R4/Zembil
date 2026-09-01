@@ -6,7 +6,7 @@
  * a good day and certain to produce on a bad one.
  */
 import { describe, expect, it } from 'vitest';
-import { cacheStrategy } from '$lib/client/cache-policy';
+import { cacheStrategy, factsFor } from '$lib/client/cache-policy';
 
 const ORIGIN = 'https://zembil.example.com';
 const PRECACHE = [
@@ -104,5 +104,33 @@ describe('everything else', () => {
 
 	it('bypasses an unparseable URL rather than throwing inside the worker', () => {
 		expect(strategy({ url: 'not a url' })).toBe('bypass');
+	});
+});
+
+describe('factsFor — the mapping, not the rule', () => {
+	it('reads the real method, url and mode off the request', () => {
+		const request = new Request(`${ORIGIN}/offline.html`, { method: 'POST' });
+		const facts = factsFor(request, ORIGIN, PRECACHE);
+		expect(facts.method).toBe('POST');
+		expect(facts.url).toBe(`${ORIGIN}/offline.html`);
+		expect(facts.origin).toBe(ORIGIN);
+		expect(facts.precache).toBe(PRECACHE);
+		// A hardcoded 'GET' here would let every POST into the cache, and no
+		// browser-level test in this suite issues one through the worker.
+		expect(cacheStrategy(facts)).toBe('bypass');
+	});
+
+	it('passes the worker own origin through, not the request one', () => {
+		const request = new Request('https://evil.example/offline.html');
+		const facts = factsFor(request, ORIGIN, PRECACHE);
+		expect(facts.origin).toBe(ORIGIN);
+		expect(cacheStrategy(facts)).toBe('bypass');
+	});
+
+	it('carries the navigate mode', () => {
+		// `Request` in Node cannot be constructed with mode 'navigate', so the
+		// assertion is that whatever the request says is what gets passed on.
+		const request = new Request(`${ORIGIN}/`);
+		expect(factsFor(request, ORIGIN, PRECACHE).mode).toBe(request.mode);
 	});
 });

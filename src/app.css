@@ -295,7 +295,10 @@ a {
 }
 
 .z-title {
-	font-family: var(--sans);
+	/* Bricolage, not DM Sans. DESIGN.md §2's table says "DM Sans 700" for the
+	 * screen title, but every 30px title in design/Zembil.dc.html is
+	 * Bricolage Grotesque — and §0 says the canvas wins. */
+	font-family: var(--display);
 	font-size: 30px;
 	font-weight: 700;
 	letter-spacing: -0.02em;
@@ -434,6 +437,16 @@ a {
 	padding: 18px 20px;
 }
 
+/* The "Card / sheet" role from DESIGN.md §3's metrics table, which is a
+ * different thing from the store card above: 24px radius, roomier padding.
+ * Used by the Account, Trips and Admin screens and by the sheet. */
+.z-panel {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 24px;
+	padding: 28px 28px 32px;
+}
+
 /* ---------------------------------------------------------------------------
  * Store palette, applied by key. The key never reaches CSS as a value — it
  * selects a class, so an unexpected string renders unstyled instead of
@@ -515,19 +528,25 @@ a {
 	}
 }
 
+/* The skeleton's appearance is NOT inside the motion query — only its
+ * animation is. A member with reduced motion should see a static placeholder,
+ * not an invisible one. DESIGN.md §5 asks for the animation to be wrapped. */
+.z-skeleton {
+	background: linear-gradient(
+		90deg,
+		var(--surface-muted) 0%,
+		var(--surface) 40%,
+		var(--surface-muted) 80%
+	);
+	background-size: 200px 100%;
+	background-repeat: no-repeat;
+}
+
 @media (prefers-reduced-motion: no-preference) {
 	.z-tick-anim {
 		animation: zTick 220ms ease;
 	}
 	.z-skeleton {
-		background: linear-gradient(
-			90deg,
-			var(--surface-muted) 0%,
-			var(--surface) 40%,
-			var(--surface-muted) 80%
-		);
-		background-size: 200px 100%;
-		background-repeat: no-repeat;
 		animation: zShimmer 1.2s infinite linear;
 	}
 	.z-sheet-anim {

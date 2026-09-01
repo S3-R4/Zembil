@@ -27,6 +27,20 @@ export interface RequestFacts {
 	precache: readonly string[];
 }
 
+/**
+ * Reads the facts off a real `Request`. Separate from `cacheStrategy` so the
+ * MAPPING is testable too: the rule being right is worth nothing if the worker
+ * feeds it the wrong `mode` or the wrong origin, and no browser-level test in
+ * this suite issues a cross-origin or non-GET request through the worker.
+ */
+export function factsFor(
+	request: Request,
+	origin: string,
+	precache: readonly string[]
+): RequestFacts {
+	return { method: request.method, url: request.url, origin, mode: request.mode, precache };
+}
+
 export function cacheStrategy(facts: RequestFacts): CacheStrategy {
 	// Only GET is cacheable at all.
 	if (facts.method !== 'GET') return 'bypass';

@@ -91,7 +91,7 @@
 	{:else}
 		<ul>
 			{#each trips as trip (trip.id)}
-				<li class="z-card">
+				<li class="z-panel">
 					<div class="head">
 						<div>
 							<p class="z-card-title">Trip {trip.seq}</p>
@@ -184,7 +184,7 @@
 		gap: 12px;
 	}
 
-	li.z-card {
+	li.z-panel {
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
@@ -201,8 +201,10 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		min-height: 36px;
-		font-size: 16px;
+		min-height: 44px;
+		/* 19px: DESIGN.md §2 calls it the floor for list rows, and these are
+		 * list rows. */
+		font-size: 19px;
 	}
 
 	.items li.left {

@@ -4,7 +4,7 @@
   until it is cleared, so this screen is not a suggestion.
 -->
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { api } from '$lib/client/api';
 	import { messageOf } from '$lib/client/app.svelte';
 	import Banner from '$lib/components/Banner.svelte';
@@ -35,8 +35,10 @@
 				body: { currentPassword, newPassword }
 			});
 			currentPassword = newPassword = confirm = '';
-			await invalidateAll();
-			await goto('/', { replaceState: true });
+			// Same ordering rule as the sign-in screen: navigate and invalidate in
+			// one step, so the guard for the group we are leaving cannot redirect
+			// us somewhere else first.
+			await goto('/', { replaceState: true, invalidateAll: true });
 		} catch (err) {
 			error = messageOf(err);
 		} finally {

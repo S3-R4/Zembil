@@ -123,7 +123,7 @@
 
 	<ul>
 		{#each users as user (user.id)}
-			<li class="z-card" class:off={!user.isActive}>
+			<li class="z-panel" class:off={!user.isActive}>
 				<div class="row">
 					<div class="grow">
 						<p class="name">{user.displayName}</p>

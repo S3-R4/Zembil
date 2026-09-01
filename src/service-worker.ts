@@ -16,7 +16,7 @@
  * and one static offline page.
  */
 import { build, files, version } from '$service-worker';
-import { cacheStrategy } from '$lib/client/cache-policy';
+import { cacheStrategy, factsFor } from '$lib/client/cache-policy';
 
 const CACHE = `zembil-${version}`;
 const OFFLINE = '/offline.html';
@@ -56,13 +56,7 @@ sw.addEventListener('fetch', (event) => {
 
 	// The whole policy lives in `cacheStrategy`, which is unit-tested against the
 	// paths that matter. This handler only carries it out.
-	const strategy = cacheStrategy({
-		method: request.method,
-		url: request.url,
-		origin: sw.location.origin,
-		mode: request.mode,
-		precache: PRECACHE
-	});
+	const strategy = cacheStrategy(factsFor(request, sw.location.origin, PRECACHE));
 
 	if (strategy === 'bypass') return;
 

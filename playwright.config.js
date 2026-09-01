@@ -32,10 +32,10 @@ export default defineConfig({
 		{
 			name: 'phone',
 			dependencies: ['setup'],
-			// The passkey spec signs out, which destroys the session token stored in
-			// admin.json server-side — so it runs last, in its own project, and
-			// nothing depends on the state it leaves.
-			testIgnore: /passkey\.spec\.js/,
+			// The passkey and session specs sign out, which destroys the session
+			// token stored in admin.json server-side — so they run last, in their
+			// own project, and nothing depends on the state they leave.
+			testIgnore: /(passkey|session)\.spec\.js/,
 			use: {
 				// The brief's target: one-handed on a 390px phone. Every assertion
 				// about reach and tap size is meaningless at any other size.
@@ -54,9 +54,11 @@ export default defineConfig({
 			}
 		},
 		{
-			name: 'passkey',
+			// These sign out, which destroys the session token stored in admin.json
+			// server-side, so they run last and nothing depends on what they leave.
+			name: 'auth-last',
 			dependencies: ['phone'],
-			testMatch: /passkey\.spec\.js/,
+			testMatch: /(passkey|session)\.spec\.js/,
 			use: {
 				browserName: 'chromium',
 				viewport: { width: 390, height: 844 },

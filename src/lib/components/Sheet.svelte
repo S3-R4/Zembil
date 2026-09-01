@@ -65,7 +65,9 @@
 		border-top-left-radius: 24px;
 		border-top-right-radius: 24px;
 		box-shadow: var(--shadow-sheet);
-		padding: 14px 28px calc(28px + env(safe-area-inset-bottom));
+		/* DESIGN.md §3, "Card / sheet": padding 28px 28px 32px. The top is 14 to
+		 * make room for the grabber, which sits above the title. */
+		padding: 14px 28px calc(32px + env(safe-area-inset-bottom));
 		display: flex;
 		flex-direction: column;
 		gap: 16px;

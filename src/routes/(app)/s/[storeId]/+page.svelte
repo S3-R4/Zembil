@@ -8,6 +8,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { Item } from '$lib/types';
+	import { untrack } from 'svelte';
 	import { listFor, messageOf, shops, sortItems } from '$lib/client/app.svelte';
 	import { newClientId } from '$lib/client/api';
 	import Banner from '$lib/components/Banner.svelte';
@@ -28,8 +29,13 @@
 	let pending = $derived(items.filter((i) => i.state === 'pending'));
 	let ticked = $derived(items.filter((i) => i.state === 'ticked'));
 
+	// `untrack`, because `seed()` READS the state it writes — `loaded`, `rev`,
+	// and the in-flight rows it preserves. Without it the effect depends on its
+	// own output and Svelte stops the page with effect_update_depth_exceeded.
+	// The dependency that matters is `data`, and only `data`.
 	$effect(() => {
-		list.seed(data);
+		const payload = data;
+		untrack(() => listFor(payload.store.id).seed(payload));
 	});
 
 	// ---- quick add --------------------------------------------------------

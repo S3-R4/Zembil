@@ -19,7 +19,7 @@ today.
 | **"Add all again"** from a past trip | A real feature, not a view of existing data. One tap to re-add a whole closed trip's items to the open one. Cheap to add on the existing model. |
 | **"Search past items"** | Needs either FTS5 over `items.name` (available — verified present in this SQLite build) or a `LIKE` scan. Trivial at family scale, but it is an addition. |
 | **Desktop keyboard shortcuts** (`Enter` add, `Space` tick row) | Desktop is explicitly a nice-to-have. |
-| **"Baba shopping now" presence** | The store card shows who is shopping right now. Needs presence tracking over the SSE bus — a real feature, not a view of existing data. |
+| ~~**"Baba shopping now" presence**~~ | **Built in M6**, though not the way this line imagined it. Rather than tracking presence over the SSE bus, a member *claims* the trip explicitly and may leave a short note (R-18…R-20, D-041). Explicit beats inferred here: presence would have said someone had the app open, which is not the same as someone going to the shop. |
 | **Per-store icons** | Colour spines ship in the MVP (they are the primary visual separator between stores); icons are additive. |
 
 ## Deferred by architecture
@@ -33,7 +33,7 @@ today.
 | **Undo a whole rollover** | Closing is currently terminal (R-9). A time-boxed undo would need the close transaction to be reversible. |
 | **Rate-limit state surviving restart** | Buckets are in-memory (D-007). Persisting them matters only if restarts become frequent. |
 | **Multi-household / tenancy** | The brief is explicit: one family. Every query would need a household boundary; adding it later is a real migration. |
-| **Per-user push notifications** | Web Push needs VAPID keys and a subscription table, and iOS requires the PWA to be installed first. |
+| ~~**Per-user push notifications**~~ | **Built in M6** (D-038, D-039). The VAPID keypair is generated on first use and stored in `server_keys`, so there is still nothing to provision. The iOS constraint in this line turned out to be real and unfixable: Safari offers push only to an installed PWA, so the account screen detects that case and says so. |
 | **Reordering items by drag** | `items.sort_order` exists and is honoured; only the gesture and the endpoint are missing. |
 | **Offline write queue** | The service worker never caches authenticated responses (a hard safety rule). True offline *writes* would need an IndexedDB outbox and replay. The MVP degrades to read-only-stale plus a retry. |
 | **Session list with per-device revocation** | `sessions.user_agent` is already captured for the account screen; "sign out everywhere" is the missing endpoint. |
@@ -44,7 +44,7 @@ today.
 
 | Item | Why deferred / note |
 |---|---|
-| **Store rename, recolour, reorder and archive UI** | `PATCH /api/stores/{id}` implements all four and is tested, but no screen calls it. Archiving is the one that matters: R-14 promises un-archiving is reachable via `?includeArchived=true`, and today nothing can archive a store in the first place, so the promise is not yet load-bearing. A store-edit sheet on the list header is the natural home. |
+| ~~**Store rename, recolour, reorder and archive UI**~~ | **Built in M6** (D-043). M6 added store *visibility*, which is a fifth field on the same endpoint and needed a home; building a sheet that exposed only that field while four tested operations sat next to it unreached would have been the wrong shape of decision. R-14's un-archive promise is load-bearing for the first time. |
 | **Theme flash for an explicit Light or Dark override** | `Appearance` is applied on mount, so a member who overrides their OS setting sees one frame of the other theme. Fixing it needs the choice available before first paint — an inline script (which `kit.csp` in hash mode will not admit from `app.html`) or a cookie read in the root `load`. The cookie is the honest fix; it was not worth a round trip's worth of complexity during M3. |
 | **Playwright on WebKit and Firefox** | The suite runs on Chromium because that is the only engine installed here, and the WebAuthn virtual authenticator is a Chrome DevTools Protocol feature with no cross-engine equivalent. Mobile Safari is the single most likely target for this app, so a WebKit run is the highest-value addition to the suite. |
 | **A real HTTPS passkey run** | Passkeys are verified over `http://localhost`, which is a secure context and exercises the identical code path. What is untested is a deployment where `ZEMBIL_RP_ID` does not match the host — a configuration failure the README warns about and nothing currently catches at startup beyond the suffix assertion. A boot-time self-check against the live origin could close it. |
@@ -57,7 +57,7 @@ today.
 | **Automatic pre-migration snapshot** | D-013's third bullet promises every migration takes a `pre-migration-<from>-to-<to>.sqlite` snapshot first and refuses to proceed if it fails. `src/lib/server/db/migrations.ts` mentions it in a comment and does not do it; `README.md` tells the operator to take one by hand. The in-process `backup()` D-013 measured is the right mechanism. This is the largest unkept promise in `DECISIONS.md`. |
 | **`ZEMBIL_LOG_LEVEL` actually filtering** | It is parsed and validated at startup (`config.ts`) and nothing reads it. `.env.example` and `README.md` now say so plainly rather than describing behaviour that does not exist. A `log(level, …)` helper used by the non-critical call sites is an hour's work; the bootstrap banner must stay unconditional at `warn`. |
 | **`pre-restore-<stamp>/` retention** | Each restore roughly doubles the volume's size and nothing removes the old ones. Deliberate — they are the undo — but the README now documents cleaning them up, and a `--keep N` flag on `restore.sh` would be better than a documented `rm -rf`. |
-| **Store-edit UI** | Already listed above; the M3 audit independently reached the same conclusion about R-14's un-archive promise. |
+| ~~**Store-edit UI**~~ | **Built in M6** — see above. |
 
 ## Found by the M2 audit
 
@@ -65,3 +65,23 @@ today.
 |---|---|
 | **Concurrent double login leaves one orphan session** | Two logins racing on the same browser both read the same `locals.sessionId`, both destroy it, and both create a row; the cookie keeps whichever wrote last and the other lives out its idle TTL. Not a race in the SQLite sense — everything after `await authenticatePassword` is synchronous on one connection — but it is a read-then-write on stale state. Deferred rather than patched because the honest fix is to destroy sessions by `(user_id, created_before)` or to make login idempotent per request, and both are more invasive than a bounded, same-user, same-browser leftover justifies. Everything else the audit found is fixed; this is the one thing it found that is not. |
 | **A boot-time self-check that `ZEMBIL_RP_ID` matches the live origin** | Already listed under M2–M5 as "a real HTTPS passkey run"; the M2 audit reached it from the other direction. |
+
+## Found while building M6
+
+| Item | Why deferred / note |
+|---|---|
+| **Notification batches do not survive a restart** | R-21's quiet-window state is in memory, like the rate-limit buckets (D-007). A restart inside a window drops that batch; the next add arms a new one. Persisting it would mean a row written on the add path — the hot path — to protect a notification nobody is yet waiting for. Revisit only if restarts become frequent. |
+| **A private shop cannot be recovered through the API** | Deliberate, not an oversight: D-040 rejects an admin override because it would make "only visible to that specific user" false in exactly the household case the member cares about. The cost is that a shop privatised by a member who then stops using the app needs one `UPDATE` against the database, documented in `README.md`. Worth revisiting only if it actually happens. |
+| **Notifications carry no per-recipient muting** | Push is on or off per device. There is no "mute this shop", no quiet hours, and no per-member preference beyond the on/off switch. At fewer than ten people and one batched message per shopping burst, a preference screen would be more machinery than the problem. |
+| **`GET /api/trips/{id}` shows the claim but nothing surfaces it prominently** | A closed trip keeps `claimed_by` and `claim_note`, so the history *can* say who did each shop. The history screen shows it, but the "carried 4 times" style nudge that would make it interesting is still the separate backlog item above. |
+| **The push payload is not signed against replay by the push service** | Standard for Web Push and not a Zembil-specific gap: the push service can see message size and timing, though not content. Recorded so nobody rediscovers it as a finding. |
+
+## Found by the M6 audit
+
+| Item | Why deferred / note |
+|---|---|
+| **The SSE stream reveals that a private store exists and when it changes** | Hints are broadcast to every stream, so a member receives `store.changed` for a store they cannot see. The id is a v4 UUID that every endpoint answers `404` for, and per-user filtering would mean the stream carrying data, which D-011 rejects for stronger reasons. Existence and edit *timing* are observable; id, name, colour and contents are not. Now stated as a carve-out in I-18 rather than left as a false absolute. |
+| **A foreign-store `tripId` is `409`, not `404`** | Mandated verbatim by R-6 step 1 of the frozen §2, reachable only by guessing a v4 UUID, and discloses nothing beyond "some trip has this id". Declined deliberately — see D-044. The correction went into I-18's wording, not into the code. |
+| **A post-commit read can `404` a write that succeeded** | `updateStore` and the claim endpoints read `{ store, trip }` back *after* the transaction commits, so a store privatised by somebody else in that window makes the caller believe their write failed when it landed. One event-loop turn wide on a single-process, synchronous-SQLite deployment, and the client refetches anyway. Recorded because the failure reads backwards. |
+| **`static/offline.html` and the PWA manifest are English only** | The offline page is a static file served by the service worker when a navigation fails, and the worker has no idea who is signed in — `users.locale` lives on the server and the page is shown precisely when the server cannot be reached. `navigator.language` is available in the worker but is the *device's* language, not the member's choice, so it would be wrong for exactly the person who changed theirs. The page says "No signal" and nothing else; the manifest's `lang`/`description` show only in an install prompt. Fixable by precaching three pages and picking one, and worth doing only alongside a locale cookie the worker can read. |
+| **An endpoint moved between members leaves the loser's browser showing a bare "Zembil"** | I-17 requires the move — the same browser profile signed in as a different member must not keep delivering to the previous one — and the move overwrites `p256dh`/`auth`. A member who somehow obtains another's endpoint string could use this to take their device; no endpoint discloses one, so this needs a leak elsewhere first. A known consequence rather than a surprise. |

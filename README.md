@@ -165,6 +165,107 @@ until someone tries to sign in.
 
 ---
 
+## Shops your family shares, and shops only you see
+
+A shop is **public** by default: every signed-in member sees it, its list and its history.
+
+Any member can switch a shop to **private** from the shop's edit sheet, and it then belongs to them
+alone. Private means private: nobody else can open it, list it, add to it, or find out that it
+exists. **This includes admins.** An admin who fetches the shop list does not see it, and asking for
+it by id returns the same "not found" as an id that was never real.
+
+That is the point of the feature, and it has one operational consequence worth knowing before
+somebody uses it:
+
+> If a member makes a **shared** shop private and then stops using the app, no admin can undo it from
+> inside Zembil. There is no override, deliberately.
+
+Recovery is one statement against the database:
+
+```sh
+docker compose exec zembil node -e "
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync('/data/zembil.db');
+  console.log(db.prepare('SELECT id, name FROM stores WHERE private_to IS NOT NULL').all());
+"
+# then, for the one you want back:
+docker compose exec zembil node -e "
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync('/data/zembil.db');
+  db.prepare('UPDATE stores SET private_to = NULL WHERE id = ?').run('<store-id>');
+"
+```
+
+Items already on the shop stay on it either way. Making it public again restores it, unchanged, to
+everyone.
+
+---
+
+## Notifications
+
+Members turn notifications on per device, from their account screen. Zembil then sends a push when
+somebody adds something to a list — but not one per item.
+
+**How the batching works.** Adding an item starts a timer rather than sending anything. Every further
+change to that shop's list — another item, a tick, an edit, someone claiming the trip — restarts the
+timer. Once the list has been quiet for `ZEMBIL_NOTIFY_QUIET_MINUTES` (default 5), **one**
+notification goes out naming what was added: *"Migros — milk, bread and 4 more."*
+
+Two consequences that are intentional:
+
+- **Notifications arrive a few minutes late.** That is the price of getting one useful message
+  instead of eleven useless ones. Lower `ZEMBIL_NOTIFY_QUIET_MINUTES` if you would rather have the
+  latency back; `0` sends immediately and gives up the batching entirely.
+- **A list somebody keeps touching still notifies eventually.** `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES`
+  (default 30) caps how far the timer can be pushed out from the first unnotified add.
+
+**Nobody is notified about their own additions.** If two people added things during the window,
+neither of them is told about it — everyone else is. And a private shop notifies nobody, because the
+only person who can see it is the person adding to it.
+
+**There is nothing to provision.** The VAPID keypair is generated the first time it is needed and
+stored in the database, so it is inside your existing backups. Restoring an old backup restores that
+keypair with it, which is what keeps existing subscriptions working.
+
+If you ever need to rotate it — `DELETE FROM server_keys WHERE name='vapid'` and restart — every
+member has to turn notifications back on, once, on each device.
+
+**iPhone and iPad: the app must be added to the Home Screen first.** Safari does not offer web push
+to a page open in a browser tab, only to an installed PWA. The account screen detects this and says
+so rather than showing a button that does nothing. Share → Add to Home Screen, open it from there,
+then enable notifications.
+
+Set `ZEMBIL_PUSH_ENABLED=0` to turn the whole feature off; the section disappears from the account
+screen.
+
+---
+
+## Who is going to the shop
+
+Anyone can claim a trip — *"I'm going to Migros"* — from that shop's screen, with an optional short
+note like *"only getting the milk"*. Everyone sees it on the home screen and on the list.
+
+A claim lasts for **one trip**, not forever. Finishing the trip ends it; there is nothing to remember
+to release, though the person who claimed it can release it early. If somebody else has already
+claimed a trip, claiming it offers to take over instead of failing.
+
+The claim stays on the finished trip, so the history shows who did each shop.
+
+---
+
+## Languages
+
+Zembil is available in **English, Turkish and German**. Each member picks their own from their
+account screen; it is a property of the person, not the device, so it follows them to the tablet.
+
+It is also what push notifications are written in — those are composed on the server, for someone who
+is not the person who triggered them, so they cannot be translated by the phone that shows them.
+
+New accounts start in whichever of the three the creating browser asked for via `Accept-Language`,
+falling back to English.
+
+---
+
 ## Data and backups
 
 Everything lives in one Docker volume, `zembil_data`, as `zembil.db` plus its `-wal` and `-shm`
@@ -256,6 +357,14 @@ never copied into the image (`.dockerignore` excludes it, and the build context 
 
 There is no application *signing* secret to provision or rotate: sessions are opaque random tokens
 stored only as SHA-256 hashes, so nothing needs signing.
+
+The one secret the application holds, it creates for itself: the **VAPID keypair** used to sign push
+notifications, generated on first use and stored in `server_keys` inside `zembil.db`. There is still
+no operator step — nothing to generate, paste or remember when you move the deployment — but it does
+mean the database file is now worth protecting for a second reason. Anyone holding a copy can send
+notifications to family devices that have subscribed. They cannot read anything with it, and it does
+not let them sign in. Rotate with `DELETE FROM server_keys WHERE name='vapid'` and a restart; every
+member then re-enables notifications once per device.
 
 `ZEMBIL_LOG_LEVEL` is validated at startup but nothing filters on it yet — setting it will not hide
 the first-admin password banner. It is in `docs/BACKLOG.md`.

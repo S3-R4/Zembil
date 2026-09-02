@@ -47,7 +47,7 @@ function expectDomainError(fn: () => unknown, code: string, status?: number) {
 
 describe('R-1 — store creation also creates its first trip', () => {
 	test('the store and its seq=1 open trip exist together', () => {
-		const { h, store } = ctx();
+		const { h, actor, store } = ctx();
 		try {
 			const trips = h.db.prepare('SELECT * FROM trips WHERE store_id = ?').all(store.id) as any[];
 			expect(trips).toHaveLength(1);
@@ -223,7 +223,7 @@ describe('R-6 — close is one atomic transaction', () => {
 		const { h, actor, store } = ctx();
 		try {
 			const added = add(h, store.id, actor, 'Milk');
-			deleteItem(h.db, added.item.id);
+			deleteItem(h.db, added.item.id, actor);
 			expectDomainError(
 				() => closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor),
 				'TRIP_EMPTY'
@@ -324,11 +324,11 @@ describe('R-8 — closed trips are immutable', () => {
 			expectDomainError(() => tickItem(h.db, bought.item.id, actor), 'TRIP_CLOSED', 409);
 			expectDomainError(() => untickItem(h.db, bought.item.id, actor), 'TRIP_CLOSED', 409);
 			expectDomainError(
-				() => updateItem(h.db, bought.item.id, { name: 'Bread ekmek', version: 2 }),
+				() => updateItem(h.db, bought.item.id, { name: 'Bread ekmek', version: 2 }, actor),
 				'TRIP_CLOSED',
 				409
 			);
-			expectDomainError(() => deleteItem(h.db, bought.item.id), 'TRIP_CLOSED', 409);
+			expectDomainError(() => deleteItem(h.db, bought.item.id, actor), 'TRIP_CLOSED', 409);
 		} finally {
 			h.close();
 		}
@@ -346,7 +346,7 @@ describe('R-9 — undo is scoped to the open trip', () => {
 
 			expectDomainError(() => untickItem(h.db, bought.item.id, actor), 'TRIP_CLOSED');
 
-			const history = getTripDetail(h.db, closedId);
+			const history = getTripDetail(h.db, closedId, actor.id);
 			expect(history.items.map((i) => i.id)).toContain(bought.item.id);
 			expect(history.trip.boughtCount).toBe(1);
 		} finally {
@@ -362,16 +362,16 @@ describe('R-10 — delete', () => {
 			const gone = add(h, store.id, actor, 'Yoghurt');
 			const kept = add(h, store.id, actor, 'Milk');
 
-			const first = deleteItem(h.db, gone.item.id);
+			const first = deleteItem(h.db, gone.item.id, actor);
 			expect(first.changed).toBe(true);
-			const again = deleteItem(h.db, gone.item.id);
+			const again = deleteItem(h.db, gone.item.id, actor);
 			expect(again.changed).toBe(false);
 			expect(again.rev).toBe(first.rev);
 
 			// Still present as a row — soft, not hard.
 			expect(h.db.prepare('SELECT * FROM items WHERE id = ?').get(gone.item.id)).toBeTruthy();
 
-			const list = getOpenList(h.db, store.id);
+			const list = getOpenList(h.db, store.id, actor.id);
 			expect(list.items.map((i) => i.id)).toEqual([kept.item.id]);
 
 			const result = closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
@@ -399,7 +399,7 @@ describe('R-10 meets R-8 and R-14 — idempotency wins the conflict', () => {
 		try {
 			const gone = add(h, store.id, actor, 'Yoghurt');
 			add(h, store.id, actor, 'Milk'); // keeps the trip non-empty so the close below can succeed
-			const first = deleteItem(h.db, gone.item.id);
+			const first = deleteItem(h.db, gone.item.id, actor);
 			expect(first.changed).toBe(true);
 
 			closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
@@ -409,7 +409,7 @@ describe('R-10 meets R-8 and R-14 — idempotency wins the conflict', () => {
 			try {
 				// A FIRST delete here would be 409 TRIP_CLOSED (see R-8's suite above).
 				// This item is already gone, and R-10's idempotency wins: 200, not 409.
-				const again = deleteItem(h.db, gone.item.id);
+				const again = deleteItem(h.db, gone.item.id, actor);
 				expect(again.changed).toBe(false);
 				expect(again.item.id).toBe(gone.item.id);
 				expect(again.rev).toBe(before);
@@ -430,17 +430,17 @@ describe('R-10 meets R-8 and R-14 — idempotency wins the conflict', () => {
 		const { h, actor, store } = ctx();
 		try {
 			const gone = add(h, store.id, actor, 'Yoghurt');
-			const first = deleteItem(h.db, gone.item.id);
+			const first = deleteItem(h.db, gone.item.id, actor);
 			expect(first.changed).toBe(true);
 
-			updateStore(h.db, store.id, { archived: true });
+			updateStore(h.db, store.id, { archived: true }, actor);
 
 			const rec = recorder();
 			const before = Number((h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev);
 			try {
 				// A FIRST delete here would be 409 STORE_ARCHIVED (see R-14's suite
 				// below). This item is already gone, and R-10's idempotency wins.
-				const again = deleteItem(h.db, gone.item.id);
+				const again = deleteItem(h.db, gone.item.id, actor);
 				expect(again.changed).toBe(false);
 				expect(again.item.id).toBe(gone.item.id);
 				expect(again.rev).toBe(before);
@@ -467,15 +467,15 @@ describe('PATCH /items — name and note semantics (§3.5, §3.1a)', () => {
 				{ name: 'Milk', note: '2L', clientId: randomUUID() },
 				actor
 			);
-			const renamed = updateItem(h.db, added.item.id, { name: 'Milk 2L', version: 1 });
+			const renamed = updateItem(h.db, added.item.id, { name: 'Milk 2L', version: 1 }, actor);
 			expect(renamed.item.name).toBe('Milk 2L');
 			expect(renamed.item.note).toBe('2L');
 
-			const cleared = updateItem(h.db, added.item.id, { note: null, version: 2 });
+			const cleared = updateItem(h.db, added.item.id, { note: null, version: 2 }, actor);
 			expect(cleared.item.note).toBe(null);
 			expect(cleared.item.name).toBe('Milk 2L');
 
-			const noted = updateItem(h.db, added.item.id, { note: '  yarim  ', version: 3 });
+			const noted = updateItem(h.db, added.item.id, { note: '  yarim  ', version: 3 }, actor);
 			expect(noted.item.note).toBe('yarim');
 		} finally {
 			h.close();
@@ -488,8 +488,8 @@ describe('reading an archived store', () => {
 		const { h, actor, store } = ctx();
 		try {
 			add(h, store.id, actor, 'Milk');
-			updateStore(h.db, store.id, { archived: true });
-			const list = getOpenList(h.db, store.id);
+			updateStore(h.db, store.id, { archived: true }, actor);
+			const list = getOpenList(h.db, store.id, actor.id);
 			expect(list.items).toHaveLength(1);
 			expect(list.store.archivedAt).toBeTypeOf('number');
 		} finally {
@@ -513,7 +513,7 @@ describe('R-13 — ordering within a list', () => {
 			h.db.prepare('UPDATE items SET ticked_at = ? WHERE id = ?').run(1000, b.item.id);
 			h.db.prepare('UPDATE items SET ticked_at = ? WHERE id = ?').run(2000, d.item.id);
 
-			const list = getOpenList(h.db, store.id);
+			const list = getOpenList(h.db, store.id, actor.id);
 			expect(list.items.map((i) => i.name)).toEqual(['A', 'C', 'D', 'B']);
 			expect(list.items.map((i) => i.state)).toEqual(['pending', 'pending', 'ticked', 'ticked']);
 			expect(a.item.sortOrder).toBeLessThan(c.item.sortOrder);
@@ -532,9 +532,9 @@ describe('R-13 — ordering within a list', () => {
 			// Same millisecond: only the id tiebreak can order these.
 			h.db.prepare('UPDATE items SET ticked_at = 5000').run();
 
-			const ids = getOpenList(h.db, store.id).items.map((i) => i.id);
+			const ids = getOpenList(h.db, store.id, actor.id).items.map((i) => i.id);
 			expect(ids).toEqual([...ids].sort());
-			expect(getOpenList(h.db, store.id).items.map((i) => i.id)).toEqual(ids);
+			expect(getOpenList(h.db, store.id, actor.id).items.map((i) => i.id)).toEqual(ids);
 		} finally {
 			h.close();
 		}
@@ -545,10 +545,10 @@ describe('R-13 — ordering within a list', () => {
 		try {
 			const carried = add(h, store.id, actor, 'Milk');
 			const deleted = add(h, store.id, actor, 'Yoghurt');
-			deleteItem(h.db, deleted.item.id);
+			deleteItem(h.db, deleted.item.id, actor);
 			closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
 
-			const list = getOpenList(h.db, store.id);
+			const list = getOpenList(h.db, store.id, actor.id);
 			expect(list.items.map((i) => i.state)).toEqual(['pending']);
 			expect(list.items.map((i) => i.id)).not.toContain(carried.item.id);
 			expect(list.items.map((i) => i.id)).not.toContain(deleted.item.id);
@@ -564,12 +564,12 @@ describe('R-13 — ordering within a list', () => {
 			const bought = add(h, store.id, actor, 'Bread');
 			const deleted = add(h, store.id, actor, 'Yoghurt');
 			tickItem(h.db, bought.item.id, actor);
-			deleteItem(h.db, deleted.item.id);
+			deleteItem(h.db, deleted.item.id, actor);
 
 			const closedId = openTrip(h, store.id);
 			closeTrip(h.db, store.id, { tripId: closedId }, actor);
 
-			const detail = getTripDetail(h.db, closedId);
+			const detail = getTripDetail(h.db, closedId, actor.id);
 			const ids = detail.items.map((i) => i.id);
 			expect(ids).toContain(carried.item.id);
 			expect(ids).toContain(bought.item.id);
@@ -602,7 +602,7 @@ describe('R-13 — ordering within a list', () => {
 			const closedId = openTrip(h, store.id);
 			closeTrip(h.db, store.id, { tripId: closedId }, actor);
 
-			const detail = getTripDetail(h.db, closedId);
+			const detail = getTripDetail(h.db, closedId, actor.id);
 			expect(detail.items.map((i) => i.state)).toEqual([
 				'ticked',
 				'ticked',
@@ -619,7 +619,7 @@ describe('R-13 — ordering within a list', () => {
 			// The open successor trip is ordered by R-13 instead: everything there is
 			// pending, so the CASE arm for 'pending' is exercised on a real trip too.
 			const successorId = openTrip(h, store.id);
-			const successor = getTripDetail(h.db, successorId);
+			const successor = getTripDetail(h.db, successorId, actor.id);
 			expect(successor.items.map((i) => i.state)).toEqual(['pending', 'pending']);
 			expect(successor.items.map((i) => i.name)).toEqual(['Milk', 'Eggs']);
 		} finally {
@@ -635,10 +635,10 @@ describe('R-14 — archiving a store', () => {
 			const item = add(h, store.id, actor, 'Milk');
 			const tripBefore = openTrip(h, store.id);
 
-			updateStore(h.db, store.id, { archived: true });
+			updateStore(h.db, store.id, { archived: true }, actor);
 
-			expect(listStores(h.db).map((s) => s.id)).not.toContain(store.id);
-			const withArchived = listStores(h.db, true).find((s) => s.id === store.id);
+			expect(listStores(h.db, actor.id).map((s) => s.id)).not.toContain(store.id);
+			const withArchived = listStores(h.db, actor.id, true).find((s) => s.id === store.id);
 			expect(withArchived?.archivedAt).toBeTypeOf('number');
 
 			const trip = h.db.prepare('SELECT * FROM trips WHERE id = ?').get(tripBefore) as any;
@@ -652,11 +652,11 @@ describe('R-14 — archiving a store', () => {
 				409
 			);
 			expectDomainError(
-				() => updateItem(h.db, item.item.id, { name: 'Milk 2', version: item.item.version }),
+				() => updateItem(h.db, item.item.id, { name: 'Milk 2', version: item.item.version }, actor),
 				'STORE_ARCHIVED',
 				409
 			);
-			expectDomainError(() => deleteItem(h.db, item.item.id), 'STORE_ARCHIVED', 409);
+			expectDomainError(() => deleteItem(h.db, item.item.id, actor), 'STORE_ARCHIVED', 409);
 			expectDomainError(() => tickItem(h.db, item.item.id, actor), 'STORE_ARCHIVED', 409);
 			expectDomainError(() => untickItem(h.db, item.item.id, actor), 'STORE_ARCHIVED', 409);
 			expectDomainError(
@@ -667,13 +667,13 @@ describe('R-14 — archiving a store', () => {
 
 			// Reads are explicitly NOT rejected — rejecting them would make
 			// "un-archiving restores it intact" unreachable from the store's screen.
-			expect(getOpenList(h.db, store.id).items).toHaveLength(1);
-			expect(listClosedTrips(h.db, store.id).trips).toEqual([]);
-			expect(getTripDetail(h.db, tripBefore).items).toHaveLength(1);
+			expect(getOpenList(h.db, store.id, actor.id).items).toHaveLength(1);
+			expect(listClosedTrips(h.db, store.id, actor.id).trips).toEqual([]);
+			expect(getTripDetail(h.db, tripBefore, actor.id).items).toHaveLength(1);
 
 			// PATCH /stores/{id} is never rejected: it is the endpoint that un-archives.
-			expect(() => updateStore(h.db, store.id, { name: 'Migros Bostanci' })).not.toThrow();
-			expect(() => updateStore(h.db, store.id, { archived: false })).not.toThrow();
+			expect(() => updateStore(h.db, store.id, { name: 'Migros Bostanci' }, actor)).not.toThrow();
+			expect(() => updateStore(h.db, store.id, { archived: false }, actor)).not.toThrow();
 		} finally {
 			h.close();
 		}
@@ -683,10 +683,10 @@ describe('R-14 — archiving a store', () => {
 		const { h, actor, store } = ctx();
 		try {
 			const item = add(h, store.id, actor, 'Milk');
-			updateStore(h.db, store.id, { archived: true });
-			updateStore(h.db, store.id, { archived: false });
+			updateStore(h.db, store.id, { archived: true }, actor);
+			updateStore(h.db, store.id, { archived: false }, actor);
 
-			const restored = listStores(h.db).find((s) => s.id === store.id);
+			const restored = listStores(h.db, actor.id).find((s) => s.id === store.id);
 			expect(restored).toBeDefined();
 			expect(restored?.archivedAt).toBe(null);
 			expect(restored?.pendingCount).toBe(1);
@@ -699,7 +699,7 @@ describe('R-14 — archiving a store', () => {
 	test('a name clash against an archived store returns its id so un-archiving is reachable', () => {
 		const { h, actor, store } = ctx();
 		try {
-			updateStore(h.db, store.id, { archived: true });
+			updateStore(h.db, store.id, { archived: true }, actor);
 			const err = expectDomainError(
 				() => createStore(h.db, { name: 'MIGROS' }, actor),
 				'STORE_NAME_TAKEN',
@@ -721,7 +721,7 @@ describe('R-15 — sort_order allocation', () => {
 			expect(a.item.sortOrder).toBe(1000);
 			expect(b.item.sortOrder).toBe(2000);
 
-			deleteItem(h.db, b.item.id);
+			deleteItem(h.db, b.item.id, actor);
 			const c = add(h, store.id, actor, 'C');
 			// The deleted row still counts, so no key is reused.
 			expect(c.item.sortOrder).toBe(3000);
@@ -739,7 +739,7 @@ describe('R-15 — sort_order allocation', () => {
 
 			const fresh = add(h, store.id, actor, 'C');
 			expect(fresh.item.sortOrder).toBe(3000);
-			expect(getOpenList(h.db, store.id).items.map((i) => i.name)).toEqual(['A', 'B', 'C']);
+			expect(getOpenList(h.db, store.id, actor.id).items.map((i) => i.name)).toEqual(['A', 'B', 'C']);
 		} finally {
 			h.close();
 		}
@@ -749,7 +749,7 @@ describe('R-15 — sort_order allocation', () => {
 		const { h, actor, store } = ctx();
 		try {
 			expect(store.sortOrder).toBe(1000);
-			updateStore(h.db, store.id, { archived: true });
+			updateStore(h.db, store.id, { archived: true }, actor);
 			const second = createStore(h.db, { name: 'BIM' }, actor);
 			expect(second.sortOrder).toBe(2000);
 		} finally {
@@ -758,9 +758,9 @@ describe('R-15 — sort_order allocation', () => {
 	});
 
 	test('PATCH /stores writes the client-supplied sortOrder directly', () => {
-		const { h, store } = ctx();
+		const { h, actor, store } = ctx();
 		try {
-			const patched = updateStore(h.db, store.id, { sortOrder: 42 });
+			const patched = updateStore(h.db, store.id, { sortOrder: 42 }, actor);
 			expect(patched.sortOrder).toBe(42);
 		} finally {
 			h.close();
@@ -777,9 +777,9 @@ describe('R-16 — stores.rev is the revalidation cursor', () => {
 			expect(added.rev).toBe(1);
 			expect(tickItem(h.db, added.item.id, actor).rev).toBe(2);
 			expect(untickItem(h.db, added.item.id, actor).rev).toBe(3);
-			expect(updateItem(h.db, added.item.id, { name: 'Milk 2L', version: 3 }).rev).toBe(4);
-			expect(deleteItem(h.db, added.item.id).rev).toBe(5);
-			expect(updateStore(h.db, store.id, { name: 'Migros Sanayi' }).rev).toBe(6);
+			expect(updateItem(h.db, added.item.id, { name: 'Milk 2L', version: 3 }, actor).rev).toBe(4);
+			expect(deleteItem(h.db, added.item.id, actor).rev).toBe(5);
+			expect(updateStore(h.db, store.id, { name: 'Migros Sanayi' }, actor).rev).toBe(6);
 		} finally {
 			h.close();
 		}
@@ -831,7 +831,7 @@ describe('R-17 — idempotent add survives a rollover', () => {
 		try {
 			const cid = randomUUID();
 			const first = addItem(h.db, store.id, { name: 'Milk', clientId: cid }, actor);
-			deleteItem(h.db, first.item.id);
+			deleteItem(h.db, first.item.id, actor);
 			const retry = addItem(h.db, store.id, { name: 'Milk', clientId: cid }, actor);
 			expect(retry.created).toBe(true);
 			expect(retry.item.id).not.toBe(first.item.id);
@@ -865,12 +865,12 @@ describe('trip history — §3.6', () => {
 				tickItem(h.db, item.item.id, actor);
 				closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
 			}
-			const page = listClosedTrips(h.db, store.id, { limit: 2 });
+			const page = listClosedTrips(h.db, store.id, actor.id, { limit: 2 });
 			expect(page.trips.map((t) => t.seq)).toEqual([3, 2]);
 			expect(page.nextBefore).toBe(2);
 			expect(page.trips[0].boughtCount).toBe(1);
 
-			const next = listClosedTrips(h.db, store.id, { limit: 2, before: page.nextBefore! });
+			const next = listClosedTrips(h.db, store.id, actor.id, { limit: 2, before: page.nextBefore! });
 			expect(next.trips.map((t) => t.seq)).toEqual([1]);
 			expect(next.nextBefore).toBe(null);
 		} finally {

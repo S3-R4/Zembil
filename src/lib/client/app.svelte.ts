@@ -83,6 +83,34 @@ export class Shops {
 		return body.store;
 	}
 
+	/**
+	 * §8.4 / R-14: the archived listing. Not folded into `stores`, because the
+	 * home screen must not show archived shops and this is the ONLY way an
+	 * archived store's id is reachable — R-14's un-archive promise depends on it.
+	 */
+	async loadArchived(): Promise<StoreSummary[]> {
+		const body = await api<{ stores: StoreSummary[] }>('/api/stores?includeArchived=true');
+		return body.stores.filter((s) => s.archivedAt !== null);
+	}
+
+	/** `PATCH /api/stores/{id}` — name, colour, sortOrder, archived, visibility. */
+	async patch(storeId: string, patch: StorePatch): Promise<StoreSummary> {
+		const body = await api<{ store: StoreSummary }>(
+			`/api/stores/${encodeURIComponent(storeId)}`,
+			{ method: 'PATCH', body: patch }
+		);
+		await this.load();
+		return body.store;
+	}
+}
+
+/** The five fields §8.6 makes patchable. `visibility` is the M6 addition. */
+export interface StorePatch {
+	name?: string;
+	color?: string;
+	sortOrder?: number;
+	archived?: boolean;
+	visibility?: 'public' | 'private';
 }
 
 export const shops = new Shops();
@@ -276,6 +304,48 @@ export class ListState {
 		this.rev = result.rev;
 		this.items = this.items.filter((i) => i.id !== item.id);
 		if (this.store) this.store = { ...this.store, rev: result.rev };
+	}
+
+	/**
+	 * Adopts a `{ store, trip }` payload from a claim write.
+	 *
+	 * Deliberately NOT `seed()`: those responses carry no items, and seed's
+	 * rev-based staleness check is about item state. A claim changes the header,
+	 * so the store and trip are replaced and the item list is left exactly as it
+	 * is — including any row with a tick in flight.
+	 */
+	private applyClaim(payload: { store: StoreSummary; trip: Trip }): void {
+		this.store = payload.store;
+		this.trip = payload.trip;
+		this.rev = Math.max(this.rev, payload.store.rev);
+	}
+
+	/**
+	 * §8.6 / R-19. `takeover` is the second attempt after a `409 TRIP_CLAIMED`:
+	 * the first call deliberately fails so the member is told who is already
+	 * going, rather than silently displacing them.
+	 */
+	async claim(note: string | null, takeover = false): Promise<void> {
+		const tripId = this.trip?.id;
+		if (!tripId) throw new Error('No open trip.');
+		this.applyClaim(
+			await api<{ store: StoreSummary; trip: Trip }>(
+				`/api/stores/${encodeURIComponent(this.storeId)}/claim`,
+				{ method: 'POST', body: { tripId, note, takeover } }
+			)
+		);
+		await shops.load();
+	}
+
+	/** R-20. Idempotent server-side; only the holder may call it. */
+	async releaseClaim(): Promise<void> {
+		this.applyClaim(
+			await api<{ store: StoreSummary; trip: Trip }>(
+				`/api/stores/${encodeURIComponent(this.storeId)}/claim`,
+				{ method: 'DELETE' }
+			)
+		);
+		await shops.load();
 	}
 
 	async close(): Promise<{ boughtCount: number; carriedCount: number }> {

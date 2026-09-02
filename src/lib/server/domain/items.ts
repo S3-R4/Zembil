@@ -1,17 +1,20 @@
 /**
- * Items — CONTRACT.md §3.5, R-2 … R-5, R-8, R-10, R-13, R-15, R-17, §3.0.
+ * Items — CONTRACT.md §3.5, §8.4, R-2 … R-5, R-8, R-10, R-13, R-15, R-17,
+ * §3.0/§8.9.
  */
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { tx } from '../db/index.js';
 import { conflict, notFound, validationFailed } from './errors.js';
 import { emitStoreChanged } from '../realtime/bus.js';
+import { noteItemAdded, noteStoreActivity } from '../notify/index.js';
 import { ITEM_SELECT, readItem, toItem, type ItemRow } from './rows.js';
 import {
 	bumpRev,
 	currentRev,
 	getStoreSummary,
-	requireStore,
+	isVisibleTo,
+	requireVisibleStore,
 	requireWritableStore,
 	type Actor
 } from './stores.js';
@@ -20,6 +23,13 @@ import type { Item, ItemMutation, StoreSummary, Trip } from '$lib/types';
 import { toTrip, TRIP_SELECT, type TripRow } from './rows.js';
 
 const now = () => Date.now();
+
+/**
+ * §8.4: an item whose store is invisible to the caller is reported exactly as an
+ * item that never existed — same code, same message, same status, no extra
+ * fields. One factory so the two answers cannot drift apart.
+ */
+const itemNotFound = () => notFound('ITEM_NOT_FOUND', 'Item not found.');
 
 /** §3.5: at most 2000 non-deleted items per trip; beyond it, 409 TRIP_ITEM_LIMIT. */
 export const MAX_ITEMS_PER_TRIP = 2000;
@@ -44,13 +54,15 @@ export function resolveOpenTrip(db: Db, storeId: string): { tripId: string; stor
 interface ItemContextRow extends ItemRow {
 	trip_status: string;
 	store_archived_at: number | null;
+	store_private_to: string | null;
 }
 
 function loadItemContext(db: Db, itemId: string): ItemContextRow | undefined {
 	return db
 		.prepare(
 			`SELECT i.*, cu.display_name AS created_by_name, tu.display_name AS ticked_by_name,
-			        t.status AS trip_status, s.archived_at AS store_archived_at
+			        t.status AS trip_status, s.archived_at AS store_archived_at,
+			        s.private_to AS store_private_to
 			   FROM items i
 			   JOIN trips  t ON t.id = i.trip_id
 			   JOIN stores s ON s.id = i.store_id
@@ -59,6 +71,16 @@ function loadItemContext(db: Db, itemId: string): ItemContextRow | undefined {
 			  WHERE i.id = ?`
 		)
 		.get(itemId) as unknown as ItemContextRow | undefined;
+}
+
+/**
+ * §8.4, and it runs BEFORE `assertWritable` at every call site: a private store
+ * must not be observable through its archived or closed state either. If this
+ * ran second, a member could tell a private store apart from a fabricated id by
+ * whether the answer was `404 ITEM_NOT_FOUND` or `409 TRIP_CLOSED`.
+ */
+function assertVisible(row: ItemContextRow, actorId: string): void {
+	if (!isVisibleTo(row.store_private_to, actorId)) throw itemNotFound();
 }
 
 /** R-8: the only writes a closed trip ever receives are those in R-6 step 5. */
@@ -106,13 +128,15 @@ export interface ListResponse {
 }
 
 /** `GET /api/stores/{storeId}/list` — §3.5. Never includes deleted or carried items. */
-export function getOpenList(db: Db, storeId: string): ListResponse {
-	const store = getStoreSummary(db, storeId);
+export function getOpenList(db: Db, storeId: string, actorId: string): ListResponse {
+	// §8.4: getStoreSummary resolves visibility first and 404s identically to a
+	// store id that never existed.
+	const store = getStoreSummary(db, storeId, actorId);
 	const tripRow = db
 		.prepare(`${TRIP_SELECT} WHERE t.store_id = ? AND t.status = 'open'`)
 		.get(storeId) as unknown as TripRow | undefined;
 	if (!tripRow) throw notFound('TRIP_NOT_FOUND', 'This store has no open list.');
-	return { store, trip: toTrip(tripRow), items: listOpenItems(db, tripRow.id) };
+	return { store, trip: toTrip(tripRow, actorId), items: listOpenItems(db, tripRow.id) };
 }
 
 export interface AddItemResult extends ItemMutation {
@@ -136,7 +160,7 @@ export function addItem(
 	const cid = validateClientId(input.clientId);
 
 	const result = tx(db, () => {
-		requireWritableStore(db, storeId);
+		requireWritableStore(db, storeId, actor.id);
 
 		// R-17: store-scoped and rollover-safe. A retry whose original committed
 		// before a close resolves to the CLONE on the successor trip.
@@ -190,7 +214,12 @@ export function addItem(
 		return { item, rev, created: true };
 	});
 
-	if (result.created) emitStoreChanged(storeId, result.rev);
+	// §8.9: a NEW row notifies; an R-17 idempotent hit changed nothing, so it
+	// bumps nothing, emits nothing and notifies nothing.
+	if (result.created) {
+		emitStoreChanged(storeId, result.rev);
+		noteItemAdded({ storeId, actorId: actor.id, itemName: result.item.name });
+	}
 	return result;
 }
 
@@ -201,7 +230,8 @@ export function addItem(
 export function updateItem(
 	db: Db,
 	itemId: string,
-	input: { name?: unknown; note?: unknown; version: unknown }
+	input: { name?: unknown; note?: unknown; version: unknown },
+	actor: Actor
 ): ItemMutation {
 	const hasName = Object.hasOwn(input, 'name') && input.name !== undefined;
 	const hasNote = Object.hasOwn(input, 'note');
@@ -212,7 +242,9 @@ export function updateItem(
 
 	const result = tx(db, () => {
 		const row = loadItemContext(db, itemId);
-		if (!row || row.deleted_at !== null) throw notFound('ITEM_NOT_FOUND', 'Item not found.');
+		if (!row) throw itemNotFound();
+		assertVisible(row, actor.id);
+		if (row.deleted_at !== null) throw itemNotFound();
 		assertWritable(row);
 		if (Number(row.version) !== version) {
 			throw conflict('VERSION_CONFLICT', 'Someone else changed this item.', {
@@ -237,6 +269,7 @@ export function updateItem(
 	});
 
 	emitStoreChanged(result.storeId, result.rev);
+	noteStoreActivity(result.storeId);
 	return { item: result.item, rev: result.rev };
 }
 
@@ -246,10 +279,11 @@ export interface DeleteResult extends ItemMutation {
 }
 
 /** R-10: soft delete, idempotent. A pending item deleted before close is not carried. */
-export function deleteItem(db: Db, itemId: string): DeleteResult {
+export function deleteItem(db: Db, itemId: string, actor: Actor): DeleteResult {
 	const result = tx(db, () => {
 		const row = loadItemContext(db, itemId);
-		if (!row) throw notFound('ITEM_NOT_FOUND', 'Item not found.');
+		if (!row) throw itemNotFound();
+		assertVisible(row, actor.id);
 
 		if (row.deleted_at !== null && row.deleted_at !== undefined) {
 			// §3.0: already deleted — bumps nothing, emits nothing.
@@ -266,7 +300,10 @@ export function deleteItem(db: Db, itemId: string): DeleteResult {
 		return { item, rev, changed: true, storeId: row.store_id };
 	});
 
-	if (result.changed) emitStoreChanged(result.storeId, result.rev);
+	if (result.changed) {
+		emitStoreChanged(result.storeId, result.rev);
+		noteStoreActivity(result.storeId);
+	}
 	return { item: result.item, rev: result.rev, changed: result.changed };
 }
 
@@ -291,8 +328,11 @@ export function untickItem(db: Db, itemId: string, actor: Actor): TickResult {
 function setTicked(db: Db, itemId: string, ticked: boolean, actor: Actor): TickResult {
 	const result = tx(db, () => {
 		const row = loadItemContext(db, itemId);
-		// §3.5: 404 if the item does not exist OR is soft-deleted.
-		if (!row || row.deleted_at !== null) throw notFound('ITEM_NOT_FOUND', 'Item not found.');
+		// §3.5: 404 if the item does not exist OR is soft-deleted. §8.4: the same
+		// 404, first, if its store is not the caller's to see.
+		if (!row) throw itemNotFound();
+		assertVisible(row, actor.id);
+		if (row.deleted_at !== null) throw itemNotFound();
 		assertWritable(row);
 
 		const target = ticked ? 'ticked' : 'pending';
@@ -319,8 +359,11 @@ function setTicked(db: Db, itemId: string, ticked: boolean, actor: Actor): TickR
 		return { item, rev, changed: true, storeId: row.store_id };
 	});
 
-	if (result.changed) emitStoreChanged(result.storeId, result.rev);
+	if (result.changed) {
+		emitStoreChanged(result.storeId, result.rev);
+		noteStoreActivity(result.storeId);
+	}
 	return { item: result.item, rev: result.rev, changed: result.changed };
 }
 
-export { requireStore };
+export { requireVisibleStore };

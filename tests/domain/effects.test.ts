@@ -60,7 +60,7 @@ describe('§3.0 — writes that bump and emit', () => {
 				{ archived: false }
 			]) {
 				const before = revOf(h, store.id);
-				const updated = updateStore(h.db, store.id, patch as any);
+				const updated = updateStore(h.db, store.id, patch as any, actor);
 				const events = rec.take();
 				expect(types(events).sort()).toEqual(['store.changed', 'stores.changed']);
 				expect(revOf(h, store.id)).toBe(before + 1);
@@ -102,8 +102,8 @@ describe('§3.0 — writes that bump and emit', () => {
 			const steps: Array<[string, () => { rev: number }]> = [
 				['tick', () => tickItem(h.db, added.item.id, actor)],
 				['untick', () => untickItem(h.db, added.item.id, actor)],
-				['patch', () => updateItem(h.db, added.item.id, { name: 'Milk 2L', version: 3 })],
-				['delete', () => deleteItem(h.db, added.item.id)]
+				['patch', () => updateItem(h.db, added.item.id, { name: 'Milk 2L', version: 3 }, actor)],
+				['delete', () => deleteItem(h.db, added.item.id, actor)]
 			];
 
 			for (const [label, run] of steps) {
@@ -171,13 +171,13 @@ describe('§3.0 — idempotent no-ops bump nothing and emit nothing', () => {
 			const b = addItem(h.db, store.id, { name: 'Bread', clientId: randomUUID() }, actor);
 			const c = addItem(h.db, store.id, { name: 'Eggs', clientId: randomUUID() }, actor);
 			tickItem(h.db, a.item.id, actor);
-			deleteItem(h.db, b.item.id);
+			deleteItem(h.db, b.item.id, actor);
 			rec.take();
 			const before = revOf(h, store.id);
 
 			expect(tickItem(h.db, a.item.id, actor).rev).toBe(before); // already ticked
 			expect(untickItem(h.db, c.item.id, actor).rev).toBe(before); // already pending
-			expect(deleteItem(h.db, b.item.id).rev).toBe(before); // already deleted
+			expect(deleteItem(h.db, b.item.id, actor).rev).toBe(before); // already deleted
 
 			expect(rec.take()).toEqual([]);
 			expect(revOf(h, store.id)).toBe(before);
@@ -351,7 +351,7 @@ describe('§4 — events are emitted after commit, never inside', () => {
 				{
 					label: 'updateStore',
 					expectedTypes: ['store.changed', 'stores.changed'],
-					run: () => updateStore(h.db, store.id, { name: 'Migros Sanayi' }),
+					run: () => updateStore(h.db, store.id, { name: 'Migros Sanayi' }, actor),
 					verify: () => {
 						const row = h.db.prepare('SELECT name FROM stores WHERE id = ?').get(store.id) as any;
 						expect(row.name).toBe('Migros Sanayi');
@@ -393,7 +393,7 @@ describe('§4 — events are emitted after commit, never inside', () => {
 					expectedTypes: ['store.changed'],
 					run: () => {
 						const current = h.db.prepare('SELECT version FROM items WHERE id = ?').get(seed.item.id) as any;
-						return updateItem(h.db, seed.item.id, { name: 'Seed 2', version: Number(current.version) });
+						return updateItem(h.db, seed.item.id, { name: 'Seed 2', version: Number(current.version) }, actor);
 					},
 					verify: () => {
 						const row = h.db.prepare('SELECT name FROM items WHERE id = ?').get(seed.item.id) as any;
@@ -403,7 +403,7 @@ describe('§4 — events are emitted after commit, never inside', () => {
 				{
 					label: 'deleteItem (first delete)',
 					expectedTypes: ['store.changed'],
-					run: () => deleteItem(h.db, seed.item.id),
+					run: () => deleteItem(h.db, seed.item.id, actor),
 					verify: () => {
 						const row = h.db.prepare('SELECT deleted_at FROM items WHERE id = ?').get(seed.item.id) as any;
 						expect(row.deleted_at).not.toBeNull();

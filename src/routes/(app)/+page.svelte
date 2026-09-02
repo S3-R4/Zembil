@@ -12,11 +12,15 @@
 	import { listFor, messageOf, shops } from '$lib/client/app.svelte';
 	import { newClientId } from '$lib/client/api';
 	import { STORE_COLORS } from '$lib/client/palette';
+	import { messages } from '$lib/client/i18n';
+	import type { StoreSummary } from '$lib/types';
 	import Banner from '$lib/components/Banner.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
 	import StoreCard from '$lib/components/StoreCard.svelte';
 
 	let { data } = $props();
+
+	const m = $derived(messages());
 
 	// Rendered from the load payload until the reactive store has been seeded.
 	// The seeding happens in an effect, and effects do not run during SSR — so
@@ -112,17 +116,53 @@
 		}
 	}
 
+	// ---- archived shops (R-14) ---------------------------------------------
+	// `GET /api/stores?includeArchived=true` is the ONLY way an archived store's
+	// id is reachable, so this sheet is what makes R-14's un-archive promise real
+	// rather than theoretical (D-043).
+	let archivedOpen = $state(false);
+	let archived = $state<StoreSummary[] | null>(null);
+	let archivedBusy = $state(false);
+	let archivedError = $state<string | null>(null);
+
+	async function openArchived() {
+		archivedOpen = true;
+		archivedError = null;
+		archivedBusy = true;
+		try {
+			archived = await shops.loadArchived();
+		} catch (err) {
+			archivedError = messageOf(err);
+		} finally {
+			archivedBusy = false;
+		}
+	}
+
+	async function restore(store: StoreSummary) {
+		if (archivedBusy) return;
+		archivedBusy = true;
+		archivedError = null;
+		try {
+			await shops.patch(store.id, { archived: false });
+			archived = await shops.loadArchived();
+		} catch (err) {
+			archivedError = messageOf(err);
+		} finally {
+			archivedBusy = false;
+		}
+	}
+
 	let initial = $derived((data.user?.displayName ?? '?').trim().charAt(0).toUpperCase());
 </script>
 
-<svelte:head><title>Shops · Zembil</title></svelte:head>
+<svelte:head><title>{m.homeTitle} · Zembil</title></svelte:head>
 
 <header>
 	<div>
-		<p class="z-eyebrow">Our lists</p>
-		<h1 class="z-title">Shops</h1>
+		<p class="z-eyebrow">{m.homeEyebrow}</p>
+		<h1 class="z-title">{m.homeTitle}</h1>
 	</div>
-	<a class="avatar" href="/you" aria-label="Your account">{initial}</a>
+	<a class="avatar" href="/you" aria-label={m.homeAccount}>{initial}</a>
 </header>
 
 <div class="body">
@@ -130,8 +170,8 @@
 
 	{#if stores.length === 0}
 		<div class="empty">
-			<p class="z-card-title">No shops yet</p>
-			<p class="z-meta">Add one, and everything you need there lives on its own list.</p>
+			<p class="z-card-title">{m.homeEmptyTitle}</p>
+			<p class="z-meta">{m.homeEmptyBody}</p>
 		</div>
 	{:else}
 		<ul>
@@ -141,43 +181,44 @@
 		</ul>
 	{/if}
 
-	<button class="add-shop" type="button" onclick={() => (addingShop = true)}>+ Add a shop</button>
+	<button class="add-shop" type="button" onclick={() => (addingShop = true)}>{m.homeAddShop}</button>
+	<button class="add-shop" type="button" onclick={openArchived}>{m.homeArchivedOpen}</button>
 </div>
 
 <div class="dock">
 	<button class="z-btn" type="button" disabled={stores.length === 0} onclick={openAdd}>
-		Add an item
+		{m.homeAddItem}
 	</button>
 </div>
 
 <!-- Quick add, from anywhere. Stays open after each item. -->
 <Sheet
 	open={adding}
-	title="Add to {targetStore?.name ?? 'a shop'}"
+	title={targetStore?.name ? m.addSheetTitle(targetStore.name) : m.addSheetTitleAny}
 	onclose={() => (adding = false)}
 >
 	<Banner message={addError} />
 	{#if justAdded}
-		<p class="added" role="status">Added “{justAdded}”. Next?</p>
+		<p class="added" role="status">{m.addAdded(justAdded)}</p>
 	{/if}
 	<form onsubmit={submitAdd}>
-		<label class="sr-only" for="quick-name">Item</label>
+		<label class="sr-only" for="quick-name">{m.addItemPlaceholder}</label>
 		<!-- svelte-ignore a11y_autofocus -->
 		<input
 			class="z-field"
 			id="quick-name"
 			bind:this={nameInput}
-			placeholder="Item"
+			placeholder={m.addItemPlaceholder}
 			maxlength="200"
 			autocomplete="off"
 			autofocus
 			bind:value={draftName}
 		/>
-		<label class="sr-only" for="quick-note">Quantity or note</label>
+		<label class="sr-only" for="quick-note">{m.addNotePlaceholder}</label>
 		<input
 			class="z-field"
 			id="quick-note"
-			placeholder="Quantity or note"
+			placeholder={m.addNotePlaceholder}
 			maxlength="500"
 			autocomplete="off"
 			bind:value={draftNote}
@@ -185,7 +226,7 @@
 
 		{#if stores.length > 1}
 			<fieldset>
-				<legend class="z-eyebrow">Shop</legend>
+				<legend class="z-eyebrow">{m.addShopLegend}</legend>
 				<div class="shops">
 					{#each stores as store (store.id)}
 						<button
@@ -204,27 +245,27 @@
 		{/if}
 
 		<button class="z-btn" type="submit" disabled={addBusy || draftName.trim().length === 0}>
-			{addBusy ? 'Adding…' : `Add to ${targetStore?.name ?? 'shop'}`}
+			{addBusy ? m.addBusy : targetStore?.name ? m.addSubmit(targetStore.name) : m.addSubmitAny}
 		</button>
 	</form>
 </Sheet>
 
-<Sheet open={addingShop} title="Add a shop" onclose={() => (addingShop = false)}>
+<Sheet open={addingShop} title={m.newShopTitle} onclose={() => (addingShop = false)}>
 	<Banner message={shopError} />
 	<form onsubmit={createStore}>
-		<label class="sr-only" for="store-name">Shop name</label>
+		<label class="sr-only" for="store-name">{m.newShopNamePlaceholder}</label>
 		<!-- svelte-ignore a11y_autofocus -->
 		<input
 			class="z-field"
 			id="store-name"
-			placeholder="Shop name"
+			placeholder={m.newShopNamePlaceholder}
 			maxlength="60"
 			autofocus
 			bind:value={shopName}
 		/>
 
 		<fieldset>
-			<legend class="z-eyebrow">Colour</legend>
+			<legend class="z-eyebrow">{m.newShopColour}</legend>
 			<div class="swatches">
 				{#each STORE_COLORS as key (key)}
 					<button
@@ -241,12 +282,74 @@
 		</fieldset>
 
 		<button class="z-btn" type="submit" disabled={shopBusy || shopName.trim().length === 0}>
-			{shopBusy ? 'Adding…' : 'Add shop'}
+			{shopBusy ? m.addBusy : m.newShopSubmit}
 		</button>
 	</form>
 </Sheet>
 
+<!-- R-14 / D-043: un-archiving is only reachable from here. -->
+<Sheet open={archivedOpen} title={m.homeArchivedTitle} onclose={() => (archivedOpen = false)}>
+	<Banner message={archivedError} />
+	<p class="z-meta">{m.homeArchivedBody}</p>
+	{#if archived === null || archived.length === 0}
+		<p class="z-meta faint">{archivedBusy ? m.working : m.homeArchivedEmpty}</p>
+	{:else}
+		<ul class="archived">
+			{#each archived as store (store.id)}
+				<li>
+					<span class="grow" data-color={store.color}>
+						<span class="archived-name">{store.name}</span>
+						<span class="z-meta">{m.cardArchived}</span>
+					</span>
+					<button
+						class="z-btn z-btn--tertiary z-btn--auto"
+						type="button"
+						disabled={archivedBusy}
+						onclick={() => restore(store)}
+					>
+						{m.homeRestore}
+					</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+</Sheet>
+
 <style>
+	.faint {
+		color: var(--text-faint);
+	}
+
+	ul.archived {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	ul.archived li {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-height: 56px;
+		border-top: 1px solid var(--rule);
+	}
+
+	ul.archived .grow {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		border-left: 4px solid var(--spine, var(--accent));
+		padding-left: 10px;
+	}
+
+	.archived-name {
+		font-size: 17px;
+		font-weight: 600;
+	}
+
 	header {
 		display: flex;
 		align-items: flex-end;

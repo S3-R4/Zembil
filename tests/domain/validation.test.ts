@@ -95,7 +95,7 @@ describe('store name — trim, 1–60', () => {
 		try {
 			expectValidationFailure(() => createStore(h.db, { name: '  ' }, actor));
 			expectValidationFailure(() => createStore(h.db, { name: 'x'.repeat(61) }, actor));
-			expectValidationFailure(() => updateStore(h.db, store.id, { name: 'x'.repeat(61) }));
+			expectValidationFailure(() => updateStore(h.db, store.id, { name: 'x'.repeat(61) }, actor));
 		} finally {
 			h.close();
 		}
@@ -125,7 +125,7 @@ describe('store color — validated against the enum, never interpolated', () =>
 		try {
 			expectValidationFailure(() => createStore(h.db, { name: 'BIM', color: 'chartreuse' }, actor));
 			expectValidationFailure(() =>
-				updateStore(h.db, store.id, { color: "red'; DROP TABLE items;--" })
+				updateStore(h.db, store.id, { color: "red'; DROP TABLE items;--" }, actor)
 			);
 			expect(h.db.prepare(`SELECT COUNT(*) AS n FROM items`).get()).toBeTruthy();
 		} finally {
@@ -154,8 +154,8 @@ describe('other scalar inputs', () => {
 		const { h, actor, store } = ctx();
 		try {
 			const added = addItem(h.db, store.id, { name: 'Milk', clientId: randomUUID() }, actor);
-			expectValidationFailure(() => updateItem(h.db, added.item.id, { version: '1' } as any));
-			expectValidationFailure(() => updateItem(h.db, added.item.id, { version: 1 } as any));
+			expectValidationFailure(() => updateItem(h.db, added.item.id, { version: '1' } as any, actor));
+			expectValidationFailure(() => updateItem(h.db, added.item.id, { version: 1 } as any, actor));
 		} finally {
 			h.close();
 		}
@@ -187,7 +187,7 @@ describe('other scalar inputs', () => {
 				undefined
 			]) {
 				expectValidationFailure(() =>
-					updateItem(h.db, added.item.id, { name: 'Bread', version } as any)
+					updateItem(h.db, added.item.id, { name: 'Bread', version } as any, actor)
 				);
 			}
 			// The item is untouched: no name change slipped through on a rejected version.
@@ -204,17 +204,17 @@ describe('other scalar inputs', () => {
 	 * and had no test of any kind: gutting `beforeSeq` left all 146 tests green.
 	 */
 	test('GET /trips rejects a before cursor that is not a safe integer >= 1', () => {
-		const { h, store } = ctx();
+		const { h, actor, store } = ctx();
 		try {
 			for (const before of [0, -1, 1.5, 9007199254740993, 1e300, NaN, Infinity, '1', null]) {
-				expectValidationFailure(() => listClosedTrips(h.db, store.id, { before }));
+				expectValidationFailure(() => listClosedTrips(h.db, store.id, actor.id, { before }));
 			}
 			// And the same for `limit`, whose §3.1b range is 1–50.
 			for (const limit of [0, -1, 51, 1.5, 9007199254740993, NaN, '10', null]) {
-				expectValidationFailure(() => listClosedTrips(h.db, store.id, { limit }));
+				expectValidationFailure(() => listClosedTrips(h.db, store.id, actor.id, { limit }));
 			}
 			// A valid cursor still works, so the bound is not simply rejecting everything.
-			expect(listClosedTrips(h.db, store.id, { before: 1, limit: 50 }).trips).toEqual([]);
+			expect(listClosedTrips(h.db, store.id, actor.id, { before: 1, limit: 50 }).trips).toEqual([]);
 		} finally {
 			h.close();
 		}
@@ -223,23 +223,23 @@ describe('other scalar inputs', () => {
 	// §3.1a/`boolean()`'s only caller: PATCH /stores' `archived` field. No other
 	// endpoint takes a boolean input.
 	test('PATCH /stores rejects a non-boolean archived value', () => {
-		const { h, store } = ctx();
+		const { h, actor, store } = ctx();
 		try {
 			for (const archived of ['true', 'false', 1, 0, null, [], {}, 'yes']) {
-				expectValidationFailure(() => updateStore(h.db, store.id, { archived } as any));
+				expectValidationFailure(() => updateStore(h.db, store.id, { archived } as any, actor));
 			}
 			// A real boolean still works, so the bound is not rejecting everything.
-			expect(updateStore(h.db, store.id, { archived: true }).archivedAt).not.toBeNull();
+			expect(updateStore(h.db, store.id, { archived: true }, actor).archivedAt).not.toBeNull();
 		} finally {
 			h.close();
 		}
 	});
 
 	test('PATCH /stores with an empty body is 400, not a silent rev bump', () => {
-		const { h, store } = ctx();
+		const { h, actor, store } = ctx();
 		try {
 			const before = (h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev;
-			expectValidationFailure(() => updateStore(h.db, store.id, {}));
+			expectValidationFailure(() => updateStore(h.db, store.id, {}, actor));
 			expect((h.db.prepare('SELECT rev FROM stores WHERE id=?').get(store.id) as any).rev).toBe(
 				before
 			);
@@ -249,12 +249,12 @@ describe('other scalar inputs', () => {
 	});
 
 	test('trip history limit is bounded to 1–50', () => {
-		const { h, store } = ctx();
+		const { h, actor, store } = ctx();
 		try {
-			expectValidationFailure(() => listClosedTrips(h.db, store.id, { limit: 0 }));
-			expectValidationFailure(() => listClosedTrips(h.db, store.id, { limit: 51 }));
-			expectValidationFailure(() => listClosedTrips(h.db, store.id, { limit: 1.5 }));
-			expect(listClosedTrips(h.db, store.id, { limit: 50 }).trips).toEqual([]);
+			expectValidationFailure(() => listClosedTrips(h.db, store.id, actor.id, { limit: 0 }));
+			expectValidationFailure(() => listClosedTrips(h.db, store.id, actor.id, { limit: 51 }));
+			expectValidationFailure(() => listClosedTrips(h.db, store.id, actor.id, { limit: 1.5 }));
+			expect(listClosedTrips(h.db, store.id, actor.id, { limit: 50 }).trips).toEqual([]);
 		} finally {
 			h.close();
 		}
@@ -366,8 +366,8 @@ describe('not found', () => {
 		try {
 			for (const [fn, code] of [
 				[() => addItem(h.db, randomUUID(), { name: 'A', clientId: randomUUID() }, actor), 'STORE_NOT_FOUND'],
-				[() => updateStore(h.db, randomUUID(), { name: 'A' }), 'STORE_NOT_FOUND'],
-				[() => updateItem(h.db, randomUUID(), { name: 'A', version: 1 }), 'ITEM_NOT_FOUND']
+				[() => updateStore(h.db, randomUUID(), { name: 'A' }, actor), 'STORE_NOT_FOUND'],
+				[() => updateItem(h.db, randomUUID(), { name: 'A', version: 1 }, actor), 'ITEM_NOT_FOUND']
 			] as Array<[() => unknown, string]>) {
 				try {
 					fn();

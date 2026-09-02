@@ -9,7 +9,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { fromBool } from '../db/index.js';
-import type { User } from '$lib/types';
+import type { Locale, User } from '$lib/types';
+import { DEFAULT_LOCALE } from '$lib/types';
 import { getConfig } from './config.js';
 
 export type AuthMethod = 'password' | 'passkey';
@@ -70,12 +71,13 @@ interface SessionJoinRow {
 	is_active: number;
 	must_change_password: number;
 	created_at: number;
+	locale: string;
 }
 
 const RESOLVE_SQL = `
   SELECT s.id AS session_id, s.last_seen_at, s.idle_expires_at, s.absolute_expires_at,
          u.id AS u_id, u.username, u.display_name, u.is_admin, u.is_active,
-         u.must_change_password, u.created_at
+         u.must_change_password, u.created_at, u.locale
     FROM sessions s
     JOIN users u ON u.id = s.user_id
    WHERE s.id = ?
@@ -89,7 +91,11 @@ function toUser(row: SessionJoinRow): User {
 		isAdmin: fromBool(row.is_admin),
 		isActive: fromBool(row.is_active),
 		mustChangePassword: fromBool(row.must_change_password),
-		createdAt: Number(row.created_at)
+		createdAt: Number(row.created_at),
+		// §8.5: the column is the ONLY source of a member's language. This is the
+		// `User` that lands in `locals.user`, so every request-time read of the
+		// locale comes from here and never from `Accept-Language`.
+		locale: (row.locale as Locale) ?? DEFAULT_LOCALE
 	};
 }
 

@@ -9,7 +9,14 @@
 	import { api, ApiError, OfflineError } from '$lib/client/api';
 	import { messageOf } from '$lib/client/app.svelte';
 	import { safeNext } from '$lib/client/redirect';
+	import { messages } from '$lib/client/i18n';
 	import Banner from '$lib/components/Banner.svelte';
+
+	// Signed out there is no member and no `users.locale`, so the root load
+	// negotiated `Accept-Language` for this screen (§8.5). That is not a
+	// violation of "locale never comes from a header": the rule is about a
+	// member's language not depending on the device, and there is no member yet.
+	const m = $derived(messages());
 
 	let username = $state('');
 	let password = $state('');
@@ -83,7 +90,7 @@
 			// OS prompt, or has no passkey on this device. Neither is an error worth
 			// a red banner — the password form is right there.
 			else if (err instanceof Error && err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
-				error = 'This device could not use a passkey. Sign in with your password.';
+				error = m.loginPasskeyFailed;
 			}
 		} finally {
 			busy = false;
@@ -95,22 +102,22 @@
 	>[0]['optionsJSON'];
 </script>
 
-<svelte:head><title>Sign in · Zembil</title></svelte:head>
+<svelte:head><title>{m.loginSubmit} · Zembil</title></svelte:head>
 
 <header>
 	<p class="z-eyebrow">Zembil</p>
-	<h1 class="z-display">Welcome back</h1>
+	<h1 class="z-display">{m.loginTitle}</h1>
 </header>
 
 <Banner message={error} />
 
 <form onsubmit={signIn}>
-	<label class="sr-only" for="username">Name</label>
+	<label class="sr-only" for="username">{m.loginName}</label>
 	<input
 		class="z-field"
 		id="username"
 		name="username"
-		placeholder="Name"
+		placeholder={m.loginName}
 		autocomplete="username webauthn"
 		autocapitalize="none"
 		autocorrect="off"
@@ -119,14 +126,14 @@
 		bind:value={username}
 	/>
 
-	<label class="sr-only" for="password">Password</label>
+	<label class="sr-only" for="password">{m.loginPassword}</label>
 	<div class="password">
 		<input
 			class="z-field"
 			id="password"
 			name="password"
 			type={showPassword ? 'text' : 'password'}
-			placeholder="Password"
+			placeholder={m.loginPassword}
 			autocomplete="current-password"
 			required
 			bind:value={password}
@@ -137,17 +144,17 @@
 			aria-pressed={showPassword}
 			onclick={() => (showPassword = !showPassword)}
 		>
-			{showPassword ? 'Hide' : 'Show'}
+			{showPassword ? m.loginHide : m.loginShow}
 		</button>
 	</div>
 
 	<div class="actions">
 		<button class="z-btn" type="submit" disabled={busy || !username || !password}>
-			{busy ? 'Signing in…' : 'Sign in'}
+			{busy ? m.loginBusy : m.loginSubmit}
 		</button>
 		{#if passkeySupported}
 			<button class="z-btn z-btn--secondary" type="button" disabled={busy} onclick={signInWithPasskey}>
-				This phone remembers you
+				{m.loginPasskey}
 			</button>
 		{/if}
 	</div>

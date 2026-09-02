@@ -5,11 +5,16 @@
 	import { forgetLists, messageOf } from '$lib/client/app.svelte';
 	import { readAppearance, saveAppearance, type Appearance } from '$lib/client/theme';
 	import { relative } from '$lib/client/time';
-	import type { Passkey } from '$lib/types';
+	import { messages } from '$lib/client/i18n';
+	import { LANGUAGE_NAMES } from '$lib/i18n';
+	import { disablePush, enablePush, readPushState, type PushState } from '$lib/client/push';
+	import { LOCALES, type Locale, type Passkey, type User } from '$lib/types';
 	import Banner from '$lib/components/Banner.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
 
 	let { data } = $props();
+
+	const m = $derived(messages());
 
 	// Null until this page has fetched for itself; until then the load's copy is
 	// the truth, so a navigation back here does not flash an empty list.
@@ -81,7 +86,7 @@
 				// The member dismissed the OS prompt. Not an error.
 				naming = false;
 			} else if (err instanceof Error && err.name === 'InvalidStateError') {
-				error = 'This device already has a passkey for your account.';
+				error = m.youPasskeyExists;
 			} else {
 				// A SecurityError here almost always means ZEMBIL_RP_ID does not match
 				// the host the browser is on — a deployment mistake, not a member's.
@@ -109,6 +114,69 @@
 		}
 	}
 
+	// ---- language (§8.5) ----------------------------------------------------
+	// The column is the single source, and it is the server's copy that matters:
+	// push text is composed there, for a recipient who is not the person who
+	// triggered it, so it cannot be translated by the phone that displays it.
+	let localeBusy = $state(false);
+
+	async function chooseLocale(next: Locale) {
+		if (localeBusy || next === data.user.locale) return;
+		localeBusy = true;
+		error = null;
+		try {
+			await api<{ user: User }>('/api/me', { method: 'PATCH', body: { locale: next } });
+			// `invalidateAll` re-runs the root load, which is what carries `locale`
+			// in page data — so every string on screen re-renders from the new
+			// catalogue without this component knowing which ones they are.
+			await invalidateAll();
+		} catch (err) {
+			error = messageOf(err);
+		} finally {
+			localeBusy = false;
+		}
+	}
+
+	// ---- notifications (§8.7) -----------------------------------------------
+	let push = $state<PushState | null>(null);
+	let pushBusy = $state(false);
+	let pushDismissed = $state(false);
+
+	$effect(() => {
+		void loadPushState();
+	});
+
+	async function loadPushState() {
+		try {
+			push = await readPushState();
+		} catch {
+			// A failure to READ the push state is not worth a banner over the whole
+			// account screen; the section simply does not appear.
+			push = null;
+		}
+	}
+
+	async function togglePush() {
+		if (pushBusy || !push) return;
+		pushBusy = true;
+		error = null;
+		pushDismissed = false;
+		try {
+			if (push.subscribed) {
+				await disablePush();
+			} else {
+				// `false` means the member dismissed the OS prompt. That is an
+				// answer, not a failure, and it must not be shown as one.
+				pushDismissed = !(await enablePush());
+			}
+			await loadPushState();
+		} catch (err) {
+			error = messageOf(err);
+		} finally {
+			pushBusy = false;
+		}
+	}
+
 	// ---- sign out ---------------------------------------------------------
 	async function signOut() {
 		if (busy) return;
@@ -131,32 +199,32 @@
 	>[0]['optionsJSON'];
 </script>
 
-<svelte:head><title>You · Zembil</title></svelte:head>
+<svelte:head><title>{m.youTitle} · Zembil</title></svelte:head>
 
 <header>
-	<p class="z-eyebrow">Signed in as</p>
+	<p class="z-eyebrow">{m.youEyebrow}</p>
 	<h1 class="z-title">{data.user.displayName}</h1>
-	<p class="z-meta">{data.user.username}{data.user.isAdmin ? ' · admin' : ''}</p>
+	<p class="z-meta">{data.user.username}{data.user.isAdmin ? ` · ${m.youAdmin}` : ''}</p>
 </header>
 
 <div class="body">
 	<Banner message={error} />
 
 	<section class="z-panel">
-		<h2 class="z-card-title">Passkeys</h2>
-		<p class="z-meta">Sign in with your face, fingerprint or device PIN instead of a password.</p>
+		<h2 class="z-card-title">{m.youPasskeys}</h2>
+		<p class="z-meta">{m.youPasskeysBody}</p>
 		{#if passkeys.length === 0}
-			<p class="z-meta faint">None on this account yet.</p>
+			<p class="z-meta faint">{m.youPasskeysNone}</p>
 		{:else}
 			<ul>
 				{#each passkeys as passkey (passkey.id)}
 					<li>
 						<span class="grow">
 							<span class="label">{passkey.deviceLabel}</span>
-							<span class="z-meta">Used {relative(passkey.lastUsedAt)}</span>
+							<span class="z-meta">{m.youPasskeyUsed(relative(passkey.lastUsedAt))}</span>
 						</span>
 						<button type="button" class="remove" disabled={busy} onclick={() => removePasskey(passkey)}>
-							Remove
+							{m.youPasskeyRemove}
 						</button>
 					</li>
 				{/each}
@@ -164,16 +232,72 @@
 		{/if}
 		{#if passkeySupported}
 			<button class="z-btn z-btn--tertiary" type="button" disabled={busy} onclick={openNaming}>
-				Add a passkey
+				{m.youPasskeyAdd}
 			</button>
 		{:else}
-			<p class="z-meta faint">This browser cannot use passkeys.</p>
+			<p class="z-meta faint">{m.youPasskeyUnsupported}</p>
 		{/if}
 	</section>
 
+	<!-- §8.7. The section is absent entirely when the operator has push switched
+	     off, rather than showing a control that would 503. -->
+	{#if push && !push.disabledOnServer}
+		<section class="z-panel">
+			<h2 class="z-card-title">{m.pushTitle}</h2>
+			<p class="z-meta">{m.pushBody}</p>
+
+			{#if push.blocker === 'ios-home-screen'}
+				<!-- The most likely outcome on this app's primary target, and the one
+				     that looks like a broken button if it is not explained. -->
+				<p class="z-meta faint">{m.pushIosHomeScreen}</p>
+			{:else if push.blocker === 'denied'}
+				<p class="z-meta faint">{m.pushDenied}</p>
+			{:else if push.blocker === 'unsupported'}
+				<p class="z-meta faint">{m.pushUnsupported}</p>
+			{:else}
+				<p class="z-meta faint">{push.subscribed ? m.pushOn : m.pushOff}</p>
+				{#if push.deviceCount > 0}
+					<p class="z-meta faint">{m.pushDevices(push.deviceCount)}</p>
+				{/if}
+				{#if pushDismissed}
+					<p class="z-meta faint">{m.pushDismissed}</p>
+				{/if}
+				<button
+					class="z-btn z-btn--tertiary"
+					type="button"
+					disabled={pushBusy}
+					onclick={togglePush}
+				>
+					{push.subscribed ? m.pushDisable : m.pushEnable}
+				</button>
+			{/if}
+		</section>
+	{/if}
+
 	<section class="z-panel">
-		<h2 class="z-card-title">Appearance</h2>
-		<div class="segmented" role="group" aria-label="Appearance">
+		<h2 class="z-card-title">{m.youLanguage}</h2>
+		<!-- Each language names itself in itself: somebody who has landed in a
+		     language they do not read has to be able to find their way out. -->
+		<div class="segmented" role="group" aria-label={m.youLanguage}>
+			{#each LOCALES as option (option)}
+				<button
+					type="button"
+					class:on={data.user.locale === option}
+					aria-pressed={data.user.locale === option}
+					disabled={localeBusy}
+					lang={option}
+					onclick={() => chooseLocale(option)}
+				>
+					{LANGUAGE_NAMES[option]}
+				</button>
+			{/each}
+		</div>
+		{#if localeBusy}<p class="z-meta faint">{m.youLanguageBusy}</p>{/if}
+	</section>
+
+	<section class="z-panel">
+		<h2 class="z-card-title">{m.youAppearance}</h2>
+		<div class="segmented" role="group" aria-label={m.youAppearance}>
 			{#each ['light', 'auto', 'dark'] as const as option (option)}
 				<button
 					type="button"
@@ -181,29 +305,33 @@
 					aria-pressed={appearance === option}
 					onclick={() => choose(option)}
 				>
-					{option[0].toUpperCase() + option.slice(1)}
+					{option === 'light'
+						? m.appearanceLight
+						: option === 'auto'
+							? m.appearanceAuto
+							: m.appearanceDark}
 				</button>
 			{/each}
 		</div>
 	</section>
 
 	{#if data.user.isAdmin}
-		<a class="z-btn z-btn--secondary" href="/you/admin">Manage the family</a>
+		<a class="z-btn z-btn--secondary" href="/you/admin">{m.youManage}</a>
 	{/if}
 
 	<button class="z-btn z-btn--tertiary" type="button" disabled={busy} onclick={signOut}>
-		Sign out
+		{m.youSignOut}
 	</button>
 </div>
 
-<Sheet open={naming} title="Name this device" onclose={() => (naming = false)}>
+<Sheet open={naming} title={m.youPasskeyNameTitle} onclose={() => (naming = false)}>
 	<Banner message={error} />
 	<form onsubmit={addPasskey}>
-		<label class="sr-only" for="passkey-label">Device name</label>
+		<label class="sr-only" for="passkey-label">{m.youPasskeyNameLabel}</label>
 		<!-- svelte-ignore a11y_autofocus -->
 		<input class="z-field" id="passkey-label" maxlength="64" autofocus bind:value={label} />
 		<button class="z-btn" type="submit" disabled={busy || label.trim().length === 0}>
-			{busy ? 'Waiting for your device…' : 'Create passkey'}
+			{busy ? m.youPasskeyWaiting : m.youPasskeyCreate}
 		</button>
 	</form>
 </Sheet>
@@ -282,6 +410,10 @@
 
 	.segmented button {
 		height: 44px;
+		/* "Türkçe" and "Deutsch" are wider than "Auto"; the row must wrap its
+		   glyphs rather than its layout. */
+		min-width: 0;
+		padding: 0 6px;
 		border-radius: 12px;
 		font-size: 15px;
 		font-weight: 600;

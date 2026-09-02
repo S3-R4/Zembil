@@ -14,6 +14,7 @@ import { errorResponse } from '../domain/responses.js';
 import type { AuthConfig } from './config.js';
 import { clearSessionCookie, readSessionCookie, refreshSessionCookie } from './cookies.js';
 import { resolveSession } from './session.js';
+import { negotiateAcceptLanguage } from './locale.js';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -163,6 +164,23 @@ export function createHandle(db: Db, config: AuthConfig): Handle {
 			);
 		}
 
-		return applySecurityHeaders(await resolve(event), authenticated);
+		// §8.5: the document is labelled in the language it was actually rendered
+		// in. `app.html` carries `lang="%zembil.lang%"` and this is the only thing
+		// that replaces it — a client-side fix would leave the SSR'd document
+		// mislabelled for screen readers and hyphenation until hydration.
+		//
+		// Signed in, the member's column is the single source. Signed out there is
+		// no member and no column, so the sign-in screen negotiates the header;
+		// §8.5's rule is that a *member's* language never depends on the device,
+		// and there is no member yet.
+		const lang = event.locals.user
+			? event.locals.user.locale
+			: negotiateAcceptLanguage(event.request.headers.get('accept-language'));
+
+		const response = await resolve(event, {
+			transformPageChunk: ({ html }) => html.replace('%zembil.lang%', lang)
+		});
+
+		return applySecurityHeaders(response, authenticated);
 	};
 }

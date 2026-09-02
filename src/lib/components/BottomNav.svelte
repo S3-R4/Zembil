@@ -5,19 +5,24 @@
 -->
 <script lang="ts">
 	import { page } from '$app/state';
+	import { messages } from '$lib/client/i18n';
 
+	const m = $derived(messages());
+
+	// Labels are read from the catalogue at render time rather than baked into
+	// the array, so a language change re-labels the nav without remounting it.
 	const tabs = [
-		{ href: '/', label: 'Shops', match: (p: string) => p === '/' || p.startsWith('/s/') },
-		{ href: '/trips', label: 'Trips', match: (p: string) => p.startsWith('/trips') },
-		{ href: '/you', label: 'You', match: (p: string) => p.startsWith('/you') }
+		{ href: '/', label: () => m.navShops, match: (p: string) => p === '/' || p.startsWith('/s/') },
+		{ href: '/trips', label: () => m.navTrips, match: (p: string) => p.startsWith('/trips') },
+		{ href: '/you', label: () => m.navYou, match: (p: string) => p.startsWith('/you') }
 	];
 </script>
 
-<nav aria-label="Main">
+<nav aria-label={m.navMain}>
 	{#each tabs as tab (tab.href)}
 		{@const active = tab.match(page.url.pathname)}
 		<a href={tab.href} class="tab" class:active aria-current={active ? 'page' : undefined}>
-			{tab.label}
+			{tab.label()}
 		</a>
 	{/each}
 </nav>

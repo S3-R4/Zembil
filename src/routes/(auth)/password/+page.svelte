@@ -7,9 +7,16 @@
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/client/api';
 	import { messageOf } from '$lib/client/app.svelte';
+	import { messages } from '$lib/client/i18n';
 	import Banner from '$lib/components/Banner.svelte';
 
 	let { data } = $props();
+
+	// §8.5: `PATCH /api/me` shares a route id with `GET /api/me` and is therefore
+	// in PASSWORD_GATE_EXEMPT, so a member who must change their password can
+	// still change their language. That is deliberate — this screen has to be
+	// readable before it can be obeyed.
+	const m = $derived(messages());
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
@@ -47,56 +54,54 @@
 	}
 </script>
 
-<svelte:head><title>Choose a password · Zembil</title></svelte:head>
+<svelte:head><title>{m.pwTitle} · Zembil</title></svelte:head>
 
 <header>
 	<p class="z-eyebrow">{data.user?.displayName ?? 'Zembil'}</p>
-	<h1 class="z-display">Choose a password</h1>
-	<p class="z-meta">
-		The one you were given is temporary. Pick something only you know — at least {MIN} characters.
-	</p>
+	<h1 class="z-display">{m.pwTitle}</h1>
+	<p class="z-meta">{m.pwBody(MIN)}</p>
 </header>
 
 <Banner message={error} />
 
 <form onsubmit={submit}>
-	<label class="sr-only" for="current">Temporary password</label>
+	<label class="sr-only" for="current">{m.pwCurrent}</label>
 	<input
 		class="z-field"
 		id="current"
 		type="password"
-		placeholder="Temporary password"
+		placeholder={m.pwCurrent}
 		autocomplete="current-password"
 		required
 		bind:value={currentPassword}
 	/>
 
-	<label class="sr-only" for="next">New password</label>
+	<label class="sr-only" for="next">{m.pwNew}</label>
 	<input
 		class="z-field"
 		id="next"
 		type="password"
-		placeholder="New password"
+		placeholder={m.pwNew}
 		autocomplete="new-password"
 		required
 		bind:value={newPassword}
 	/>
-	{#if tooShort}<p class="hint">{MIN - newPassword.length} more to go.</p>{/if}
+	{#if tooShort}<p class="hint">{m.pwMore(MIN - newPassword.length)}</p>{/if}
 
-	<label class="sr-only" for="confirm">Repeat new password</label>
+	<label class="sr-only" for="confirm">{m.pwRepeat}</label>
 	<input
 		class="z-field"
 		id="confirm"
 		type="password"
-		placeholder="Repeat new password"
+		placeholder={m.pwRepeat}
 		autocomplete="new-password"
 		required
 		bind:value={confirm}
 	/>
-	{#if mismatch}<p class="hint">Those two do not match.</p>{/if}
+	{#if mismatch}<p class="hint">{m.pwMismatch}</p>{/if}
 
 	<button class="z-btn" type="submit" disabled={busy || !ready}>
-		{busy ? 'Saving…' : 'Save and continue'}
+		{busy ? m.saving : m.pwSubmit}
 	</button>
 </form>
 

@@ -102,7 +102,13 @@ describe('§3.4 — stores', () => {
 					'pendingCount',
 					'rev',
 					'sortOrder',
-					'tickedCount'
+					'tickedCount',
+					// §8.6: StoreSummary gains visibility and the four Claim fields.
+					'visibility',
+					'claimedByName',
+					'claimedByMe',
+					'claimedAt',
+					'claimNote'
 				].sort()
 			);
 

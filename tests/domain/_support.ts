@@ -109,18 +109,30 @@ export function recorder(userId = 'u', sessionId = 's') {
 	};
 }
 
-/** Minimal `App.Locals` for calling a route handler directly. */
-export function localsFor(user: TestUser | null, sessionId = 'session-1') {
+/**
+ * Minimal `App.Locals` for calling a route handler directly.
+ *
+ * `isAdmin` is a parameter rather than a constant because §8.4 turns "is this
+ * caller an admin" into a question worth asking of every store-scoped endpoint:
+ * the answer is that it changes nothing, and a test cannot assert that against a
+ * helper that can only build non-admins.
+ */
+export function localsFor(
+	user: TestUser | null,
+	sessionId = 'session-1',
+	options: { isAdmin?: boolean } = {}
+) {
 	return {
 		user: user
 			? {
 					id: user.id,
 					username: user.username,
 					displayName: user.displayName,
-					isAdmin: false,
+					isAdmin: options.isAdmin ?? false,
 					isActive: true,
 					mustChangePassword: false,
-					createdAt: Date.now()
+					createdAt: Date.now(),
+					locale: 'en' as const
 				}
 			: null,
 		sessionId: user ? sessionId : null

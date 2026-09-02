@@ -4,10 +4,12 @@
  * Everything that reads or writes `users` lives here. Routes hold no SQL.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { AdminUser, Passkey, User } from '$lib/types';
+import type { AdminUser, Locale, Passkey, User } from '$lib/types';
 import { bool, fromBool, tx, type Db } from '../db/index.js';
 import { DomainError, conflict, notFound } from '../domain/errors.js';
 import { requiredText } from '../domain/validate.js';
+import { DEFAULT_LOCALE } from '$lib/types';
+import { validateLocale } from './locale.js';
 import { generateTemporaryPassword, hashPassword, usernameKey } from './password.js';
 
 export interface UserRow {
@@ -22,6 +24,7 @@ export interface UserRow {
 	created_at: number;
 	updated_at: number;
 	disabled_at: number | null;
+	locale: string;
 }
 
 export function toUser(row: UserRow): User {
@@ -32,13 +35,18 @@ export function toUser(row: UserRow): User {
 		isAdmin: fromBool(row.is_admin),
 		isActive: fromBool(row.is_active),
 		mustChangePassword: fromBool(row.must_change_password),
-		createdAt: Number(row.created_at)
+		createdAt: Number(row.created_at),
+		// I-14 makes this one of the three by CHECK, so the fallback is not a
+		// validator — it is what keeps a row written before migration 002 (or by
+		// a future column default change) from producing `undefined` in a
+		// response shape the client destructures.
+		locale: (row.locale as Locale) ?? DEFAULT_LOCALE
 	};
 }
 
 const SELECT_USER = `
   SELECT id, username, username_key, display_name, password_hash, is_admin, is_active,
-         must_change_password, created_at, updated_at, disabled_at
+         must_change_password, created_at, updated_at, disabled_at, locale
     FROM users
 `;
 
@@ -137,7 +145,7 @@ export function listUsers(db: Db): AdminUser[] {
 	const rows = db
 		.prepare(
 			`SELECT u.id, u.username, u.username_key, u.display_name, u.password_hash, u.is_admin,
-			        u.is_active, u.must_change_password, u.created_at, u.updated_at, u.disabled_at,
+			        u.is_active, u.must_change_password, u.created_at, u.updated_at, u.disabled_at, u.locale,
 			        (SELECT COUNT(*) FROM credentials c WHERE c.user_id = u.id) AS passkey_count,
 			        (SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
 			   FROM users u
@@ -241,6 +249,13 @@ export interface CreateUserInput {
 	username: unknown;
 	displayName: unknown;
 	isAdmin: unknown;
+	/**
+	 * §8.5: the account's INITIAL interface language, negotiated by the route
+	 * from the creating request's `Accept-Language`. Omitted means
+	 * `DEFAULT_LOCALE` — which is what `runBootstrap` gets, since it has no
+	 * request to negotiate against.
+	 */
+	locale?: Locale;
 }
 
 export interface CreatedUser {
@@ -266,6 +281,10 @@ export async function createUser(db: Db, input: CreateUserInput): Promise<Create
 	// Captured before the await below: TypeScript drops the narrowing of a
 	// property access across the closure that `tx()` takes.
 	const isAdmin: boolean = input.isAdmin;
+	// Validated even though the route negotiated it: `createUser` is also called
+	// from tests and scripts, and an unchecked value here would be a 500 from the
+	// I-14 CHECK rather than a 400.
+	const locale: Locale = input.locale === undefined ? DEFAULT_LOCALE : validateLocale(input.locale);
 	const key = usernameKey(username);
 	const temporaryPassword = generateTemporaryPassword();
 	const passwordHash = await hashPassword(temporaryPassword);
@@ -278,8 +297,8 @@ export async function createUser(db: Db, input: CreateUserInput): Promise<Create
 		db.prepare(
 			`INSERT INTO users (id, username, username_key, display_name, password_hash, is_admin,
 			                    is_active, must_change_password, webauthn_user_handle,
-			                    created_at, updated_at, disabled_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, NULL)`
+			                    created_at, updated_at, disabled_at, locale)
+			 VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, NULL, ?)`
 		).run(
 			id,
 			username,
@@ -289,12 +308,27 @@ export async function createUser(db: Db, input: CreateUserInput): Promise<Create
 			bool(isAdmin),
 			newUserHandle(),
 			ts,
-			ts
+			ts,
+			locale
 		);
 		return toUser(requireUser(db, id));
 	});
 
 	return { user, temporaryPassword };
+}
+
+/**
+ * §8.5: `PATCH /api/me`. The id is the caller's own, taken from the session by
+ * the route; there is no parameter here or anywhere above it that names another
+ * user, at any privilege level. Bumps nothing and emits nothing (§8.9).
+ */
+export function setLocale(db: Db, userId: string, locale: Locale): User {
+	db.prepare('UPDATE users SET locale = ?, updated_at = ? WHERE id = ?').run(
+		locale,
+		Date.now(),
+		userId
+	);
+	return toUser(requireUser(db, userId));
 }
 
 export interface PatchUserInput {

@@ -7,7 +7,7 @@
  * route which forgot to validate — in tests, not in production.
  */
 import { validationFailed } from './errors.js';
-import type { StoreColor } from '$lib/types';
+import type { StoreColor, StoreVisibility } from '$lib/types';
 
 export const STORE_COLORS: readonly StoreColor[] = Object.freeze([
 	'terracotta',
@@ -48,7 +48,32 @@ export function optionalText(value: unknown, field: string, max: number): string
 
 export const itemName = (value: unknown) => requiredText(value, 'Name', 200);
 export const itemNote = (value: unknown) => optionalText(value, 'Note', 500);
-export const storeName = (value: unknown) => requiredText(value, 'Name', 60);
+/**
+ * §3.1a, tightened by the M6 audit: a store name carries no control characters.
+ *
+ * This is load-bearing, not hygiene. `stores.name_key` namespaces a private
+ * store's key as `<ownerId> U+001F <normalized name>` (migration 003), so a
+ * name containing U+001F could be crafted to land in another member's key space
+ * and collide with — or shadow — their private shop. Rejecting the whole C0/C1
+ * range costs nothing: no shop is called anything with a control character in
+ * it, and `trim()` has already removed the whitespace ones a paste might carry.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/u;
+
+export const storeName = (value: unknown) => {
+	const name = requiredText(value, 'Name', 60);
+	if (CONTROL_CHARS.test(name)) throw validationFailed('Name cannot contain control characters.');
+	return name;
+};
+
+/**
+ * §8.6: a claim note is 1–140 characters after §3.1c trimming; `null`, absent or
+ * empty-after-trim clears it. Validated HERE and not by the migration-002
+ * `CHECK`, for the §3.1a reason: a constraint that reaches the user is a 500,
+ * and a 500 on a long note is a defect, not validation.
+ */
+export const claimNote = (value: unknown) => optionalText(value, 'Note', 140);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -66,6 +91,25 @@ export function storeColor(value: unknown): StoreColor {
 		throw validationFailed('Unknown colour.');
 	}
 	return value as StoreColor;
+}
+
+export const STORE_VISIBILITIES: readonly StoreVisibility[] = Object.freeze([
+	'public',
+	'private'
+]);
+
+/**
+ * §8.6 / §8.4: a closed enum, validated exactly like `storeColor`. The value
+ * decides whether a store is visible to the rest of the family, so anything
+ * outside the enum is a 400 rather than a silently-ignored field — an ignored
+ * `visibilty` typo would return 200 and leave a store the caller believes is
+ * private fully public.
+ */
+export function storeVisibility(value: unknown): StoreVisibility {
+	if (typeof value !== 'string' || !STORE_VISIBILITIES.includes(value as StoreVisibility)) {
+		throw validationFailed('Unknown visibility.');
+	}
+	return value as StoreVisibility;
 }
 
 /**
@@ -116,4 +160,28 @@ export const beforeSeq = (value: unknown) =>
 /** NFKC + lowercase + collapsed whitespace — the `stores.name_key` normalization. */
 export function storeNameKey(name: string): string {
 	return name.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
+}
+
+/**
+ * The delimiter between a private store's owner and its normalized name.
+ * `storeName` rejects control characters, so a name can never contain one.
+ */
+export const NAME_KEY_SEPARATOR = '\u001f';
+
+/**
+ * §8.4 / migration 003: the stored `name_key`, scoped to the store's visibility.
+ *
+ * Uniqueness has to have the same scope as visibility, or the UNIQUE constraint
+ * becomes an oracle — the M6 audit found that a table-wide key let any member
+ * discover a private store's NAME by guessing it and reading the 409. Public
+ * names stay unique among public stores; each member's private names stay
+ * unique to that member; the two spaces never meet.
+ *
+ * `privateTo` is the owner id for a private store and `null` for a public one.
+ * It is ALWAYS the value being written, never the value currently stored — a
+ * store changing visibility changes its key in the same transaction.
+ */
+export function scopedNameKey(name: string, privateTo: string | null): string {
+	const key = storeNameKey(name);
+	return privateTo === null ? key : `${privateTo}${NAME_KEY_SEPARATOR}${key}`;
 }

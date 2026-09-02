@@ -27,6 +27,9 @@ export const validationFailed = (message = 'That value is not valid.') =>
 
 export const notFound = (code: string, message: string) => new DomainError(code, 404, message);
 
+/** §3.1 shared code. R-20 uses it for releasing someone else's claim. */
+export const forbidden = (message: string) => new DomainError('FORBIDDEN', 403, message);
+
 export const conflict = (code: string, message: string, extra?: ErrorExtra) =>
 	new DomainError(code, 409, message, extra);
 

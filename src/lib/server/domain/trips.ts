@@ -1,13 +1,15 @@
 /**
- * Trips, close and rollover — CONTRACT.md §3.5, §3.6, R-6 … R-12, R-15, §3.0.
+ * Trips, close, rollover and claims — CONTRACT.md §3.5, §3.6, §8.4, §8.6,
+ * R-6 … R-12, R-15, R-18 … R-20, §3.0/§8.9.
  *
  * Close is a single atomic transaction, always.
  */
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { tx } from '../db/index.js';
-import { conflict, notFound, validationFailed } from './errors.js';
+import { conflict, forbidden, notFound, validationFailed } from './errors.js';
 import { emitStoreChanged, emitStoresChanged } from '../realtime/bus.js';
+import { noteStoreActivity } from '../notify/index.js';
 import {
 	ITEM_SELECT,
 	TRIP_SELECT,
@@ -18,11 +20,26 @@ import {
 	type ItemRow,
 	type TripRow
 } from './rows.js';
-import { bumpRev, openTripId, requireStore, type Actor } from './stores.js';
-import { beforeSeq, boundedInt } from './validate.js';
-import type { Item, Trip, TripSummary } from '$lib/types';
+import {
+	bumpRev,
+	currentRev,
+	getStoreSummary,
+	openTripId,
+	requireVisibleStore,
+	requireVisibleStoreAs,
+	requireWritableStore,
+	type Actor
+} from './stores.js';
+import { beforeSeq, boundedInt, claimNote as validateClaimNote, boolean } from './validate.js';
+import type { Item, StoreSummary, Trip, TripSummary } from '$lib/types';
 
 const now = () => Date.now();
+
+/**
+ * §8.4: the 404 for a trip whose store is invisible is byte-identical to the 404
+ * for a tripId that never existed. One factory, so they cannot drift.
+ */
+const tripNotFound = () => notFound('TRIP_NOT_FOUND', 'Trip not found.');
 
 export interface CloseResult {
 	closedTrip: Trip;
@@ -106,8 +123,10 @@ export function closeTrip(
 	const tripId = input.tripId;
 
 	const result = tx(db, () => {
-		const store = requireStore(db, storeId);
-		if (store.archivedAt !== null) throw conflict('STORE_ARCHIVED', 'This store is archived.');
+		// §8.4: visibility first — an invisible store 404s before it can 409, so
+		// its archived state is not observable either. R-14: an archived store
+		// rejects close with 409 STORE_ARCHIVED.
+		requireWritableStore(db, storeId, actor.id);
 
 		// 1. Re-read the trip inside the transaction.
 		const trip = db.prepare('SELECT * FROM trips WHERE id = ?').get(tripId) as
@@ -117,9 +136,19 @@ export function closeTrip(
 		// 409. Trips are never deleted, so it cannot be stale state — it is a
 		// client bug or a guess, and a recoverable-looking 409 would hide it
 		// behind a retry loop exactly as it would for a malformed body (§3.5).
-		if (!trip) throw notFound('TRIP_NOT_FOUND', 'Trip not found.');
+		if (!trip) throw tripNotFound();
 		// A trip that EXISTS but is closed, or belongs to another store, is the
 		// genuinely stale case and still gets the 409 with openTripId.
+		//
+		// The M6 audit observed that this makes a real-but-foreign trip id
+		// distinguishable from an invented one, and §8.4 is written as an
+		// absolute. It stays as it is: **R-6 step 1 of the FROZEN §2 mandates
+		// this 409 in exactly these words**, reaching it requires guessing a v4
+		// UUID, and it discloses nothing but "some trip has this id". The
+		// contract is not edited to match an implementation and an implementation
+		// is not changed out from under a frozen rule on the strength of an
+		// unreachable finding — §8.4's absolute is what was overstated, and it is
+		// corrected there instead.
 		if (trip.store_id !== storeId || trip.status !== 'open') {
 			throw conflict('TRIP_ALREADY_CLOSED', 'That trip is already finished.', {
 				openTripId: openTripId(db, storeId) ?? ''
@@ -176,17 +205,19 @@ export function closeTrip(
 		const newTrip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(newTripId) as unknown as TripRow;
 
 		return {
-			closedTrip: toTrip(closedTrip),
-			newTrip: toTrip(newTrip),
+			closedTrip: toTrip(closedTrip, actor.id),
+			newTrip: toTrip(newTrip, actor.id),
 			boughtCount: Number(boughtRow.n),
 			carriedCount: pending.length,
 			rev
 		};
 	});
 
-	// 7. Emit AFTER commit, never inside it.
+	// 7. Emit AFTER commit, never inside it. §8.9: and notify in the same place,
+	//    under the same condition.
 	emitStoreChanged(storeId, result.rev);
 	emitStoresChanged();
+	noteStoreActivity(storeId);
 	return result;
 }
 
@@ -199,9 +230,11 @@ export interface TripHistoryPage {
 export function listClosedTrips(
 	db: Db,
 	storeId: string,
+	actorId: string,
 	options: { limit?: unknown; before?: unknown } = {}
 ): TripHistoryPage {
-	requireStore(db, storeId);
+	// §8.4: 404 STORE_NOT_FOUND, identical to a store id that never existed.
+	requireVisibleStore(db, storeId, actorId);
 	const limit = options.limit === undefined ? 20 : boundedInt(options.limit, 'limit', 1, 50);
 	const before = options.before === undefined ? null : beforeSeq(options.before);
 
@@ -226,7 +259,7 @@ export function listClosedTrips(
 	const page = rows.slice(0, limit);
 	const hasMore = rows.length > limit;
 	return {
-		trips: page.map(toTripSummary),
+		trips: page.map((row) => toTripSummary(row, actorId)),
 		nextBefore: hasMore && page.length > 0 ? Number(page[page.length - 1].seq) : null
 	};
 }
@@ -251,11 +284,14 @@ export interface TripDetail {
  * applies to the open list only. Soft-deleted items are excluded per I-8. Works
  * for open and closed trips alike.
  */
-export function getTripDetail(db: Db, tripId: string): TripDetail {
+export function getTripDetail(db: Db, tripId: string, actorId: string): TripDetail {
 	const row = db.prepare(`${TRIP_SUMMARY_SELECT} WHERE t.id = ?`).get(tripId) as
 		| TripRow
 		| undefined;
-	if (!row) throw notFound('TRIP_NOT_FOUND', 'Trip not found.');
+	if (!row) throw tripNotFound();
+	// §8.4: a trip on a store the caller cannot see answers with the SAME 404 as
+	// a tripId that never existed — same code, same message, same status.
+	requireVisibleStoreAs(db, row.store_id, actorId, tripNotFound);
 
 	const items = db
 		.prepare(
@@ -266,5 +302,186 @@ export function getTripDetail(db: Db, tripId: string): TripDetail {
 		)
 		.all(tripId) as unknown as ItemRow[];
 
-	return { trip: toTripSummary(row), items: items.map(toItem) };
+	return { trip: toTripSummary(row, actorId), items: items.map(toItem) };
+}
+
+// ---------------------------------------------------------------------------
+// Claims — §8.6, R-18 … R-20.
+// ---------------------------------------------------------------------------
+
+export interface ClaimResult {
+	store: StoreSummary;
+	trip: Trip;
+	/** false when nothing was written: the same holder re-claiming with the same
+	 *  note (R-19), or releasing an already-unclaimed trip (R-20). §8.9 then
+	 *  bumps nothing, emits nothing and notifies nothing. */
+	changed: boolean;
+	rev: number;
+}
+
+interface ClaimTripRow {
+	id: string;
+	store_id: string;
+	status: string;
+	claimed_by: string | null;
+	claimed_at: number | null;
+	claim_note: string | null;
+}
+
+/**
+ * The same staleness guard `trips/close` uses (§3.5, §8.6): a missing or
+ * non-string `tripId` is 400 — the client is broken, and a recoverable-looking
+ * 409 would hide that behind a retry loop. A well-formed tripId that never
+ * existed is 404; one that exists but is not this store's open trip is 409
+ * TRIP_ALREADY_CLOSED with the openTripId sibling field.
+ */
+function requireOpenTrip(db: Db, storeId: string, tripId: string): ClaimTripRow {
+	const trip = db
+		.prepare('SELECT id, store_id, status, claimed_by, claimed_at, claim_note FROM trips WHERE id = ?')
+		.get(tripId) as ClaimTripRow | undefined;
+	if (!trip) throw tripNotFound();
+	// Deliberately identical to `closeTrip`'s answer, including the foreign-store
+	// case — §8.6 defines this guard as "the same staleness guard trips/close
+	// uses", and two staleness guards that disagree is worse than either answer.
+	if (trip.store_id !== storeId || trip.status !== 'open') {
+		throw conflict('TRIP_ALREADY_CLOSED', 'That trip is already finished.', {
+			openTripId: openTripId(db, storeId) ?? ''
+		});
+	}
+	return trip;
+}
+
+function displayNameOf(db: Db, userId: string): string {
+	const row = db.prepare('SELECT display_name FROM users WHERE id = ?').get(userId) as
+		| { display_name: string }
+		| undefined;
+	// A claim held by an account that no longer exists cannot happen — claimed_by
+	// is ON DELETE SET NULL and a NULL claimed_by reads as unclaimed (I-16) — but
+	// the message must never be `undefined is already shopping.`
+	return row ? row.display_name : 'Someone';
+}
+
+/**
+ * `POST /api/stores/{storeId}/claim` — R-18, R-19.
+ *
+ * All three claim columns are written by ONE UPDATE (I-16). The claim lands on
+ * the store's OPEN trip, so R-6 retires it by opening a fresh one: nothing has
+ * to remember to clear anything, and the claim stays on the closed trip as the
+ * record of who did that shopping.
+ */
+export function claimTrip(
+	db: Db,
+	storeId: string,
+	input: { tripId: unknown; note?: unknown; takeover?: unknown },
+	actor: Actor
+): ClaimResult {
+	if (typeof input.tripId !== 'string' || input.tripId.length === 0) {
+		throw validationFailed('tripId is required.');
+	}
+	const tripId = input.tripId;
+	// §3.1a: validated BEFORE the write. The migration-002 CHECK on claim_note is
+	// the backstop that catches a route which forgot, in tests, not in production.
+	const note = validateClaimNote(input.note);
+	const takeover =
+		input.takeover === undefined || input.takeover === null
+			? false
+			: boolean(input.takeover, 'takeover');
+
+	const result = tx(db, () => {
+		// §8.4: visibility first, before the trip is even looked up. R-14 does not
+		// list claiming among the writes an archived store rejects, so it is not
+		// rejected here either.
+		requireVisibleStore(db, storeId, actor.id);
+		const trip = requireOpenTrip(db, storeId, tripId);
+
+		const holder = trip.claimed_by ?? null;
+		const mine = holder !== null && holder === actor.id;
+		if (holder !== null && !mine && !takeover) {
+			// R-19: the message names the holder — a display name, never an id — so
+			// the client can offer "take over anyway" without a second round trip.
+			// §8.10: TRIP_CLAIMED carries no sibling field.
+			throw conflict('TRIP_CLAIMED', `${displayNameOf(db, holder)} is already shopping this trip.`);
+		}
+
+		// R-19: the same member re-claiming their own trip is not a conflict, it
+		// updates the note — and if the note is unchanged too, nothing happened.
+		if (mine && (trip.claim_note ?? null) === note) {
+			return { changed: false, rev: currentRev(db, storeId), tripId };
+		}
+
+		// R-19: the same holder editing their note keeps the ORIGINAL claimed_at.
+		// "Ayşe has been shopping since 18:04" is the useful fact, and rewriting
+		// the timestamp on a note edit silently changes it to 18:31. A takeover
+		// and a fresh claim both start the clock; only an edit preserves it.
+		// I-16 holds either way — all three columns are still written by this one
+		// statement.
+		const claimedAt = mine ? (trip.claimed_at ?? now()) : now();
+		db.prepare(
+			'UPDATE trips SET claimed_by = ?, claimed_at = ?, claim_note = ? WHERE id = ?'
+		).run(actor.id, claimedAt, note, tripId);
+
+		return { changed: true, rev: bumpRev(db, storeId), tripId };
+	});
+
+	return finishClaim(db, storeId, result, actor);
+}
+
+/**
+ * `DELETE /api/stores/{storeId}/claim` — R-20. Clears the three columns in one
+ * UPDATE. Only the current holder may release; anyone else gets 403 FORBIDDEN.
+ * Releasing an unclaimed trip is an idempotent success that writes nothing.
+ */
+export function releaseClaim(db: Db, storeId: string, actor: Actor): ClaimResult {
+	const result = tx(db, () => {
+		requireVisibleStore(db, storeId, actor.id);
+		const tripId = openTripId(db, storeId);
+		// R-1 makes this unreachable: a store never exists without an open trip.
+		if (tripId === null) throw tripNotFound();
+		const trip = db.prepare('SELECT claimed_by FROM trips WHERE id = ?').get(tripId) as
+			| { claimed_by: string | null }
+			| undefined;
+
+		const holder = trip?.claimed_by ?? null;
+		// I-16: claimed_by IS NULL is unclaimed whatever the other two columns say.
+		if (holder === null) return { changed: false, rev: currentRev(db, storeId), tripId };
+		if (holder !== actor.id) {
+			// A 403, not a 404: the caller can see this store, so the existence of
+			// the claim is not a secret from them — only the right to end it is.
+			throw forbidden('Only the person shopping can release this.');
+		}
+
+		db.prepare(
+			'UPDATE trips SET claimed_by = NULL, claimed_at = NULL, claim_note = NULL WHERE id = ?'
+		).run(tripId);
+
+		return { changed: true, rev: bumpRev(db, storeId), tripId };
+	});
+
+	return finishClaim(db, storeId, result, actor);
+}
+
+/**
+ * §8.9: a claim that changed something bumps `rev` and emits BOTH store events —
+ * the home screen card shows the claim and so does the list header — and
+ * notifies. One that changed nothing does none of the three. Everything here
+ * happens AFTER the transaction commits.
+ */
+function finishClaim(
+	db: Db,
+	storeId: string,
+	result: { changed: boolean; rev: number; tripId: string },
+	actor: Actor
+): ClaimResult {
+	if (result.changed) {
+		emitStoresChanged();
+		emitStoreChanged(storeId, result.rev);
+		noteStoreActivity(storeId);
+	}
+	const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(result.tripId) as unknown as TripRow;
+	return {
+		store: getStoreSummary(db, storeId, actor.id),
+		trip: toTrip(trip, actor.id),
+		changed: result.changed,
+		rev: result.rev
+	};
 }

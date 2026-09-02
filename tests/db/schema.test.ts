@@ -16,14 +16,24 @@ describe('migration runner', () => {
 		const h = harness();
 		try {
 			expect(getUserVersion(h.db)).toBe(LATEST_VERSION);
-			expect(LATEST_VERSION).toBe(1);
+			expect(LATEST_VERSION).toBe(3);
 			const tables = (
 				h.db
 					.prepare(`SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
 					.all() as Array<{ name: string }>
 			).map((r) => r.name);
 			expect(tables.sort()).toEqual(
-				['credentials', 'items', 'sessions', 'stores', 'trips', 'users', 'webauthn_challenges'].sort()
+				[
+					'credentials',
+					'items',
+					'push_subscriptions',
+					'server_keys',
+					'sessions',
+					'stores',
+					'trips',
+					'users',
+					'webauthn_challenges'
+				].sort()
 			);
 		} finally {
 			h.close();
@@ -35,8 +45,8 @@ describe('migration runner', () => {
 		try {
 			const result = migrate(h.db);
 			expect(result.applied).toEqual([]);
-			expect(result.from).toBe(1);
-			expect(result.to).toBe(1);
+			expect(result.from).toBe(LATEST_VERSION);
+			expect(result.to).toBe(LATEST_VERSION);
 		} finally {
 			h.close();
 		}
@@ -47,7 +57,7 @@ describe('migration runner', () => {
 		try {
 			h.db.prepare('SELECT 1').get();
 			const second = h.second({ migrate: true });
-			expect(getUserVersion(second)).toBe(1);
+			expect(getUserVersion(second)).toBe(LATEST_VERSION);
 		} finally {
 			h.close();
 		}
@@ -58,7 +68,7 @@ describe('migration runner', () => {
 		try {
 			// Re-running 001's DDL against an already-migrated database must abort.
 			expect(() => h.db.exec('CREATE TABLE users (id TEXT PRIMARY KEY) STRICT')).toThrow();
-			expect(getUserVersion(h.db)).toBe(1);
+			expect(getUserVersion(h.db)).toBe(LATEST_VERSION);
 		} finally {
 			h.close();
 		}

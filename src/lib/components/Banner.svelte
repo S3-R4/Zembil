@@ -1,19 +1,25 @@
 <!-- An inline error with an optional retry. Shows what the server said (§3.1),
      never a substitute of our own. -->
 <script lang="ts">
+	import { messages } from '$lib/client/i18n';
+
 	interface Props {
 		message: string | null;
 		onretry?: () => void;
 	}
 
 	let { message, onretry }: Props = $props();
+
+	// `message` itself is NOT translated: it is what the server said, and §3.1
+	// writes it for a person. Only "Retry", which this component authors, is.
+	const m = $derived(messages());
 </script>
 
 {#if message}
 	<div class="banner" role="alert">
 		<span>{message}</span>
 		{#if onretry}
-			<button type="button" onclick={onretry}>Retry</button>
+			<button type="button" onclick={onretry}>{m.retry}</button>
 		{/if}
 	</div>
 {/if}

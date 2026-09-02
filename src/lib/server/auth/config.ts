@@ -21,6 +21,34 @@ export interface AuthConfig {
 	sessionIdleDays: number;
 	sessionAbsoluteDays: number;
 	logLevel: 'debug' | 'info' | 'warn' | 'error';
+	/** §3.9. Master switch for web push. Everything else about push is
+	 *  self-provisioning, so this exists only as an operator kill switch. */
+	pushEnabled: boolean;
+	/**
+	 * §8.7 VAPID `sub` claim: a `mailto:` or `https:` URL identifying the sender
+	 * to the push service. Defaults to the origin, so there is nothing to
+	 * provision — but ONLY when the origin is `https:`, because RFC 8292 admits
+	 * no other scheme and `web-push` enforces it.
+	 *
+	 * `null` on a plain-`http:` origin, which is the local development case. No
+	 * valid contact URI can be derived from `http://localhost:5173`, and
+	 * fabricating one would be a lie in a JWT. Delivery declines to send with one
+	 * log line instead; a browser cannot receive real web push against a
+	 * non-HTTPS deployment anyway, so nothing is lost that was ever going to work.
+	 */
+	vapidSubject: string | null;
+	/**
+	 * §3.9. A store's added items are held back until the list has been quiet
+	 * for this long, then delivered as ONE notification. This is the whole
+	 * anti-spam mechanism: five people adding eleven things over a minute is one
+	 * buzz, not eleven.
+	 */
+	notifyQuietMinutes: number;
+	/**
+	 * The ceiling on that hold-back. Without it a list somebody keeps touching
+	 * never goes quiet and the notification never arrives at all.
+	 */
+	notifyMaxDelayMinutes: number;
 }
 
 function parseIntEnv(
@@ -117,6 +145,46 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
 		);
 	}
 
+	// §3.9. `false` only for an explicit off switch; anything else is on, because
+	// the failure mode of a typo here should be "notifications still work".
+	const pushEnabledRaw = env.ZEMBIL_PUSH_ENABLED?.trim().toLowerCase();
+	const pushEnabled = !(pushEnabledRaw === '0' || pushEnabledRaw === 'false' || pushEnabledRaw === 'no');
+
+	// An explicitly set value is always validated and a bad one crashes the
+	// process, per §6's standard. The DEFAULT is derived, and a derived value
+	// that cannot be valid becomes null rather than an error — an operator who
+	// never set this variable should not be told they got it wrong.
+	const vapidSubjectRaw = env.ZEMBIL_VAPID_SUBJECT?.trim();
+	let vapidSubject: string | null;
+	if (vapidSubjectRaw) {
+		if (vapidSubjectRaw.length > 200) {
+			throw new Error('ZEMBIL_VAPID_SUBJECT is too long (max 200).');
+		}
+		if (!/^(mailto:|https:\/\/)/.test(vapidSubjectRaw)) {
+			throw new Error(
+				`ZEMBIL_VAPID_SUBJECT must be a mailto: or https:// URL, got: ${vapidSubjectRaw}`
+			);
+		}
+		vapidSubject = vapidSubjectRaw;
+	} else {
+		vapidSubject = originIsHttps ? origin : null;
+	}
+
+	const notifyQuietMinutes = parseIntEnv(env, 'ZEMBIL_NOTIFY_QUIET_MINUTES', 5, {
+		min: 0,
+		max: 240
+	});
+	const notifyMaxDelayMinutes = parseIntEnv(env, 'ZEMBIL_NOTIFY_MAX_DELAY_MINUTES', 30, {
+		min: 1,
+		max: 1440
+	});
+	if (notifyMaxDelayMinutes < notifyQuietMinutes) {
+		throw new Error(
+			`ZEMBIL_NOTIFY_MAX_DELAY_MINUTES (${notifyMaxDelayMinutes}) must be >= ` +
+				`ZEMBIL_NOTIFY_QUIET_MINUTES (${notifyQuietMinutes}).`
+		);
+	}
+
 	const logLevelRaw = env.ZEMBIL_LOG_LEVEL?.trim() || 'info';
 	if (!LOG_LEVELS.has(logLevelRaw)) {
 		throw new Error(`ZEMBIL_LOG_LEVEL must be one of debug|info|warn|error, got: ${logLevelRaw}`);
@@ -132,7 +200,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
 		bootstrapPassword,
 		sessionIdleDays,
 		sessionAbsoluteDays,
-		logLevel: logLevelRaw as AuthConfig['logLevel']
+		logLevel: logLevelRaw as AuthConfig['logLevel'],
+		pushEnabled,
+		vapidSubject,
+		notifyQuietMinutes,
+		notifyMaxDelayMinutes
 	};
 }
 

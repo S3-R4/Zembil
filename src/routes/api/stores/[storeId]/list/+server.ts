@@ -6,6 +6,6 @@ import { actorOf, handle, ok } from '$lib/server/domain/responses';
 
 export const GET: RequestHandler = async ({ locals, params }) =>
 	handle(() => {
-		actorOf(locals);
-		return ok(getOpenList(getDb(), params.storeId));
+		const actor = actorOf(locals);
+		return ok(getOpenList(getDb(), params.storeId, actor.id));
 	});

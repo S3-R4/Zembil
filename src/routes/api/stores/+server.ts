@@ -6,9 +6,11 @@ import { actorOf, handle, ok, readJson } from '$lib/server/domain/responses';
 
 export const GET: RequestHandler = async ({ locals, url }) =>
 	handle(() => {
-		actorOf(locals);
+		// §8.4: the actor comes from the session and nowhere else. A store private
+		// to somebody else is absent from the array.
+		const actor = actorOf(locals);
 		const includeArchived = url.searchParams.get('includeArchived') === 'true';
-		return ok({ stores: listStores(getDb(), includeArchived) });
+		return ok({ stores: listStores(getDb(), actor.id, includeArchived) });
 	});
 
 export const POST: RequestHandler = async ({ locals, request }) =>

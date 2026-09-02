@@ -14,6 +14,10 @@
  * So the cache holds exactly three kinds of thing, all of them public and all
  * of them versioned or immutable: the hashed build assets, the static files,
  * and one static offline page.
+ *
+ * The `push` and `notificationclick` handlers added for §8.7 do not change any
+ * of that: they read a payload the server encrypted for this browser, show it,
+ * and open a URL. Nothing is written to the cache on either path.
  */
 import { build, files, version } from '$service-worker';
 import { cacheStrategy, factsFor } from '$lib/client/cache-policy';
@@ -93,6 +97,113 @@ sw.addEventListener('fetch', (event) => {
 				cache.put(request, response.clone());
 			}
 			return response;
+		})()
+	);
+});
+
+// ---------------------------------------------------------------------------
+// Web push — CONTRACT.md §8.7.
+//
+// The payload is composed on the SERVER, per recipient, in that recipient's
+// language (§8.5), and it is already encrypted to this browser's own key. The
+// worker therefore renders it as-is and translates nothing: it has no idea who
+// is signed in, and a worker that outlived a sign-out would otherwise render a
+// notification in the previous member's language.
+//
+// It carries no user ids, no item ids and no note text — only a store name, up
+// to five item names, a count, and the URL to open.
+// ---------------------------------------------------------------------------
+
+interface ZembilPushPayload {
+	title: string;
+	body: string;
+	/** `{ url: '/s/{storeId}' }` — where a tap should land. Nested under `data`
+	 *  because that is the shape the server composes (`push/messages.ts`) and the
+	 *  shape `showNotification` carries through to `notificationclick`. */
+	data?: { url?: string };
+	/** Coalescing key, so a second notification for the same shop replaces the
+	 *  first rather than stacking. The whole point of R-21 is one buzz per shop
+	 *  per burst, and the notification tray should agree with that. */
+	tag?: string;
+}
+
+function parsePayload(event: PushEvent): ZembilPushPayload | null {
+	if (!event.data) return null;
+	try {
+		const parsed: unknown = event.data.json();
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+		const candidate = parsed as Partial<ZembilPushPayload>;
+		if (typeof candidate.title !== 'string' || typeof candidate.body !== 'string') return null;
+		const url = candidate.data?.url;
+		return {
+			title: candidate.title,
+			body: candidate.body,
+			data: { url: typeof url === 'string' ? url : undefined },
+			tag: typeof candidate.tag === 'string' ? candidate.tag : undefined
+		};
+	} catch {
+		return null;
+	}
+}
+
+sw.addEventListener('push', (event) => {
+	const payload = parsePayload(event);
+
+	// A push we cannot read still has to produce a visible notification. Every
+	// browser that implements push requires `userVisibleOnly`, and silently
+	// swallowing one is what gets a site's push permission revoked wholesale.
+	const title = payload?.title ?? 'Zembil';
+	const body = payload?.body ?? '';
+
+	event.waitUntil(
+		sw.registration.showNotification(title, {
+			body,
+			icon: '/icon-192.png',
+			badge: '/icon-192.png',
+			tag: payload?.tag,
+			// With a tag set, `renotify` is what makes a REPLACED notification buzz
+			// again — otherwise a second batch for the same shop updates the tray
+			// silently and nobody looks.
+			renotify: payload?.tag !== undefined,
+			data: { url: payload?.data?.url ?? '/' }
+		} as NotificationOptions)
+	);
+});
+
+sw.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	const data = event.notification.data as { url?: string } | undefined;
+	const target = typeof data?.url === 'string' ? data.url : '/';
+
+	event.waitUntil(
+		(async () => {
+			const url = new URL(target, sw.location.origin);
+			// Same-origin only. `data.url` comes from our own server, but a URL that
+			// reaches `openWindow` is worth pinning to the origin regardless — it is
+			// one line, and the alternative is trusting every future change to the
+			// payload composer.
+			if (url.origin !== sw.location.origin) return;
+
+			const clients = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
+
+			// Focus a tab that is already on this list, rather than opening a second
+			// one — a family member who taps three notifications should end up with
+			// one app, not three.
+			for (const client of clients) {
+				if (client.url === url.href && 'focus' in client) {
+					await client.focus();
+					return;
+				}
+			}
+			// Otherwise reuse any open Zembil window and navigate it.
+			for (const client of clients) {
+				if ('navigate' in client && 'focus' in client) {
+					await client.focus();
+					await client.navigate(url.href);
+					return;
+				}
+			}
+			await sw.clients.openWindow(url.href);
 		})()
 	);
 });

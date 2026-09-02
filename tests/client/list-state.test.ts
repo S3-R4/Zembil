@@ -23,7 +23,12 @@ const store = (rev: number): StoreSummary => ({
 	pendingCount: 0,
 	tickedCount: 0,
 	lastClosedTripAt: null,
-	archivedAt: null
+	archivedAt: null,
+	visibility: 'public',
+	claimedByName: null,
+	claimedByMe: false,
+	claimedAt: null,
+	claimNote: null
 });
 
 const trip: Trip = {
@@ -33,7 +38,11 @@ const trip: Trip = {
 	status: 'open',
 	openedAt: 1,
 	closedAt: null,
-	closedByName: null
+	closedByName: null,
+	claimedByName: null,
+	claimedByMe: false,
+	claimedAt: null,
+	claimNote: null
 };
 
 const item = (over: Partial<Item> & { id: string }): Item => ({

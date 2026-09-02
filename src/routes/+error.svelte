@@ -5,19 +5,26 @@
 -->
 <script lang="ts">
 	import { page } from '$app/state';
+	import { messages } from '$lib/client/i18n';
+
+	// The error page can render before any `load` has produced page data, so
+	// `messages()` falls back to English there. That is the only place in the app
+	// where the fallback is reachable, and an untranslated error page is a better
+	// outcome than a blank one.
+	const m = $derived(messages());
 
 	let code = $derived(page.error?.code ?? '');
 	let offline = $derived(code === 'OFFLINE');
 	let title = $derived(
 		offline
-			? 'No signal'
+			? m.errOfflineTitle
 			: page.status === 404
-				? 'Not here'
+				? m.errNotFound
 				: page.status === 403
-					? 'Not for you'
+					? m.errForbidden
 					: page.status === 401
-						? 'Please sign in'
-						: 'Something went wrong'
+						? m.errUnauthorized
+						: m.errUnknown
 	);
 </script>
 
@@ -26,16 +33,18 @@
 <main>
 	<div>
 		<h1 class="z-display">{title}</h1>
-		<p class="z-meta">{page.error?.message ?? 'Please try again.'}</p>
+		<!-- The server's own message (§3.1), never a substitute of ours. Only the
+		     fallback for "no message at all" comes from the catalogue. -->
+		<p class="z-meta">{page.error?.message ?? m.errTryAgain}</p>
 	</div>
 	<div class="actions">
 		{#if offline || page.status >= 500}
-			<button class="z-btn" type="button" onclick={() => location.reload()}>Retry</button>
+			<button class="z-btn" type="button" onclick={() => location.reload()}>{m.retry}</button>
 		{/if}
 		{#if page.status === 401}
-			<a class="z-btn" href="/login">Sign in</a>
+			<a class="z-btn" href="/login">{m.errSignIn}</a>
 		{:else}
-			<a class="z-btn z-btn--secondary" href="/">Back to shops</a>
+			<a class="z-btn z-btn--secondary" href="/">{m.errBack}</a>
 		{/if}
 	</div>
 </main>

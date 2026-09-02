@@ -11,6 +11,18 @@
  *   interface Locals { user: User | null; sessionId: string | null; }
  */
 
+/**
+ * The three interface languages. Stored per USER (`users.locale`), not per
+ * device: the server composes push notification text for a recipient who is not
+ * the person who triggered it, so it cannot be translated by the client that
+ * will display it.
+ */
+export type Locale = 'en' | 'tr' | 'de';
+
+export const LOCALES: readonly Locale[] = Object.freeze(['en', 'tr', 'de']);
+
+export const DEFAULT_LOCALE: Locale = 'en';
+
 export interface User {
 	id: string;
 	username: string;
@@ -19,6 +31,7 @@ export interface User {
 	isActive: boolean;
 	mustChangePassword: boolean;
 	createdAt: number;
+	locale: Locale;
 }
 
 /** Admin listing only — never sent to a non-admin. */
@@ -47,7 +60,29 @@ export type StoreColor =
 	| 'teal'
 	| 'slate';
 
-export interface StoreSummary {
+/**
+ * `public` — every signed-in member sees the store.
+ * `private` — only the one member it belongs to sees it, writes to it, or can
+ *   learn that it exists. Admins included; see CONTRACT.md §3.4a.
+ */
+export type StoreVisibility = 'public' | 'private';
+
+/**
+ * Who is shopping this trip right now, and what they said they would pick up.
+ *
+ * Attached to a TRIP, so it ends when the trip does (R-18). `claimedByMe` is
+ * computed per request from the session, because §3 forbids sending a user id
+ * to a non-admin — the client needs to know whether the release button is its
+ * to press, and the display name is not a safe way to decide that.
+ */
+export interface Claim {
+	claimedByName: string | null;
+	claimedByMe: boolean;
+	claimedAt: number | null;
+	claimNote: string | null;
+}
+
+export interface StoreSummary extends Claim {
 	id: string;
 	name: string;
 	color: StoreColor;
@@ -58,11 +93,12 @@ export interface StoreSummary {
 	tickedCount: number;
 	lastClosedTripAt: number | null;
 	archivedAt: number | null; // non-null only in the ?includeArchived=true listing
+	visibility: StoreVisibility;
 }
 
 export type TripStatus = 'open' | 'closed';
 
-export interface Trip {
+export interface Trip extends Claim {
 	id: string;
 	storeId: string;
 	seq: number;
@@ -115,6 +151,30 @@ export interface StoreNameTakenError extends ApiError {
 export interface ItemMutation {
 	item: Item;
 	rev: number;
+}
+
+/**
+ * Web push — CONTRACT.md §3.9.
+ *
+ * `PushRegistration` is what the browser's `PushSubscription.toJSON()` gives,
+ * narrowed to the two fields the server stores. Nothing here is a secret of
+ * ours: `p256dh` and `auth` encrypt a payload TO this browser.
+ */
+export interface PushRegistration {
+	endpoint: string;
+	keys: { p256dh: string; auth: string };
+}
+
+/** `GET /api/push/key` — the VAPID public key, base64url. Safe to publish. */
+export interface PushKeyResponse {
+	publicKey: string;
+}
+
+/** `GET /api/push/subscription` — is THIS browser registered for THIS member? */
+export interface PushStatusResponse {
+	subscribed: boolean;
+	/** How many of the member's own devices are registered. Never another's. */
+	deviceCount: number;
 }
 
 /** Realtime hints — CONTRACT.md §4. Hints, never data. */

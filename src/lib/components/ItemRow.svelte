@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
 	import type { Item } from '$lib/types';
+	import { messages } from '$lib/client/i18n';
 
 	interface Props {
 		item: Item;
@@ -18,6 +19,8 @@
 
 	let { item, busy, ontoggle, onopen }: Props = $props();
 	let ticked = $derived(item.state === 'ticked');
+
+	const m = $derived(messages());
 </script>
 
 <div class="row" class:ticked>
@@ -47,18 +50,17 @@
 			<span class="name">{item.name}</span>
 			{#if item.note}<span class="note">{item.note}</span>{/if}
 			{#if item.carryCount > 0 && !ticked}
-				<span class="note carried"
-					>Carried over {item.carryCount}
-					{item.carryCount === 1 ? 'time' : 'times'}</span
-				>
+				<span class="note carried">{m.rowCarried(item.carryCount)}</span>
 			{/if}
 		</span>
 	</button>
 
 	{#if ticked}
-		<button class="undo" type="button" disabled={busy} onclick={() => ontoggle(item)}>Undo</button>
+		<button class="undo" type="button" disabled={busy} onclick={() => ontoggle(item)}>
+			{m.rowUndo}
+		</button>
 	{:else}
-		<button class="edit" type="button" aria-label="Edit {item.name}" onclick={() => onopen(item)}>
+		<button class="edit" type="button" aria-label={m.rowEdit(item.name)} onclick={() => onopen(item)}>
 			<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
 				<path
 					d="M4 20h4L19 9l-4-4L4 16z"

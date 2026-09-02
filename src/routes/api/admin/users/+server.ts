@@ -6,6 +6,7 @@ import { handleAuth } from '$lib/server/auth/http';
 import { enforce, limiters } from '$lib/server/auth/ratelimit';
 import { requireAdmin } from '$lib/server/auth/guards';
 import { createUser, listUsers } from '$lib/server/auth/users';
+import { negotiateAcceptLanguage } from '$lib/server/auth/locale';
 
 export const GET: RequestHandler = async ({ locals }) =>
 	handleAuth(() => {
@@ -24,7 +25,12 @@ export const POST: RequestHandler = async ({ locals, request }) =>
 		const created = await createUser(getDb(), {
 			username: body.username,
 			displayName: body.displayName,
-			isAdmin: body.isAdmin
+			isAdmin: body.isAdmin,
+			// §8.5: the ONE moment a header decides a locale. The admin creating
+			// the account is usually sitting next to the person it is for, so their
+			// browser's language is the best first guess available; the member
+			// changes it with `PATCH /api/me` and the column wins from then on.
+			locale: negotiateAcceptLanguage(request.headers.get('accept-language'))
 		});
 		return ok(created, 201);
 	});

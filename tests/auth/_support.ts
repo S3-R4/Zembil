@@ -171,6 +171,7 @@ export function localsOf(
 					isActive: true,
 					mustChangePassword: false,
 					createdAt: Date.now(),
+					locale: 'en' as const,
 					...overrides
 				}
 			: null,

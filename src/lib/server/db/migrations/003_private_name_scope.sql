@@ -1,0 +1,44 @@
+-- ============================================================================
+-- Zembil migration 003 — scope store-name uniqueness to visibility
+-- ============================================================================
+--
+-- Found by the M6 audit. Migration 002 left `stores.name_key` UNIQUE across the
+-- whole table, so a private store's NAME was discoverable: type "Eczane", get
+-- `409 STORE_NAME_TAKEN`, see no such shop in your list, and you have learned
+-- that somebody has a private shop called Eczane. That is a worse disclosure
+-- than the store id R-22 was careful to withhold, and it made I-18 ("not its
+-- name, not a name collision") false as written. It also made the feature
+-- annoying in the obvious way: two members could not both have a shop called
+-- Migros if either one was private.
+--
+-- The fix is to make the uniqueness scope match the visibility scope, by
+-- NAMESPACING the key rather than by changing the constraint:
+--
+--   public store          name_key = <normalized name>
+--   private store of U    name_key = U || U+001F || <normalized name>
+--
+-- so public names stay unique among public stores, each member's private names
+-- stay unique to that member, and the two spaces can never meet.
+--
+-- Namespacing rather than a partial unique index, because `name_key TEXT NOT
+-- NULL UNIQUE` is a COLUMN constraint: SQLite implements it with an implicit
+-- `sqlite_autoindex_stores_1` that cannot be dropped, so replacing it needs the
+-- twelve-step table rebuild — and that rebuild needs `PRAGMA foreign_keys=OFF`,
+-- which is a NO-OP inside a transaction. Our migration runner is transactional
+-- by design (`BEGIN IMMEDIATE` per migration), so the rebuild would run with
+-- foreign keys ON, and `DROP TABLE stores` would then perform an implicit
+-- DELETE that cascades through `trips` into `items`. Every shopping list in the
+-- database, deleted, to tidy up an index. Namespacing needs no rebuild at all.
+--
+-- U+001F (UNIT SEPARATOR) is the delimiter, and `storeName` now rejects control
+-- characters (CONTRACT.md §3.1a), so a name can never contain one and the two
+-- key spaces cannot be forced to collide.
+-- ---------------------------------------------------------------------------
+
+-- Re-key every store that is already private. There are none on the deployed
+-- database — visibility shipped in migration 002 and this follows it in the
+-- same milestone — but a migration that only works on an empty case is not a
+-- migration.
+UPDATE stores
+   SET name_key = private_to || char(31) || name_key
+ WHERE private_to IS NOT NULL;

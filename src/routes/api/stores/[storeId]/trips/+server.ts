@@ -22,9 +22,9 @@ function numeric(raw: string | null): number | undefined {
 
 export const GET: RequestHandler = async ({ locals, params, url }) =>
 	handle(() => {
-		actorOf(locals);
+		const actor = actorOf(locals);
 		return ok(
-			listClosedTrips(getDb(), params.storeId, {
+			listClosedTrips(getDb(), params.storeId, actor.id, {
 				limit: numeric(url.searchParams.get('limit')),
 				before: numeric(url.searchParams.get('before'))
 			})

@@ -9,11 +9,15 @@
 	import { api } from '$lib/client/api';
 	import { messageOf } from '$lib/client/app.svelte';
 	import { shortDate } from '$lib/client/time';
+	import { messages } from '$lib/client/i18n';
+	import { copyText } from '$lib/client/clipboard';
 	import type { AdminUser } from '$lib/types';
 	import Banner from '$lib/components/Banner.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
 
 	let { data } = $props();
+
+	const m = $derived(messages());
 
 	let fetched = $state<AdminUser[] | null>(null);
 	let users = $derived(fetched ?? data.users);
@@ -40,9 +44,9 @@
 	}
 
 	function status(user: AdminUser): string {
-		if (!user.isActive) return `Disabled ${shortDate(user.disabledAt)}`;
-		if (user.passkeyCount === 0) return 'Active · password only';
-		return `Active · ${user.passkeyCount} ${user.passkeyCount === 1 ? 'passkey' : 'passkeys'}`;
+		if (!user.isActive) return m.adminDisabled(shortDate(user.disabledAt));
+		if (user.passkeyCount === 0) return m.adminPasswordOnly;
+		return m.adminPasskeys(user.passkeyCount);
 	}
 
 	// ---- new user ---------------------------------------------------------
@@ -53,6 +57,35 @@
 
 	// ---- the one-time password reveal -------------------------------------
 	let reveal = $state<{ who: string; password: string } | null>(null);
+
+	/**
+	 * Copy-to-clipboard for a password that will never be shown again.
+	 *
+	 * `null` while idle, then 'ok' or 'failed' for a few seconds. The failure
+	 * state matters more than it looks: the async Clipboard API is unavailable
+	 * in plenty of real contexts, and a button that appears to work while
+	 * copying nothing is how somebody loses the one copy of a password that is
+	 * not stored anywhere.
+	 */
+	let copied = $state<'ok' | 'failed' | null>(null);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+	async function copyPassword() {
+		if (!reveal) return;
+		copied = (await copyText(reveal.password)) ? 'ok' : 'failed';
+		if (copyTimer !== null) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => (copied = null), 2500);
+	}
+
+	/** The sheet is the only place the password exists in the DOM, so closing it
+	 *  must actually remove it — `reveal = null` unmounts the node rather than
+	 *  hiding it, and the copy state goes with it. */
+	function closeReveal() {
+		reveal = null;
+		copied = null;
+		if (copyTimer !== null) clearTimeout(copyTimer);
+		copyTimer = null;
+	}
 
 	async function createUser(event: SubmitEvent) {
 		event.preventDefault();
@@ -97,10 +130,10 @@
 		});
 </script>
 
-<svelte:head><title>Family · Zembil</title></svelte:head>
+<svelte:head><title>{m.adminTitle} · Zembil</title></svelte:head>
 
 <header>
-	<a class="back" href="/you" aria-label="Back to your account">
+	<a class="back" href="/you" aria-label={m.adminBack}>
 		<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
 			<path
 				d="M15 5 8 12l7 7"
@@ -113,8 +146,8 @@
 		</svg>
 	</a>
 	<div>
-		<p class="z-eyebrow">Accounts</p>
-		<h1 class="z-title">The family</h1>
+		<p class="z-eyebrow">{m.adminEyebrow}</p>
+		<h1 class="z-title">{m.adminTitle}</h1>
 	</div>
 </header>
 
@@ -129,7 +162,7 @@
 						<p class="name">{user.displayName}</p>
 						<p class="z-meta">{user.username} · {status(user)}</p>
 					</div>
-					{#if user.isAdmin}<span class="z-chip admin">Admin</span>{/if}
+					{#if user.isAdmin}<span class="z-chip admin">{m.adminChip}</span>{/if}
 				</div>
 
 				<div class="actions">
@@ -139,7 +172,7 @@
 						disabled={busy !== null}
 						onclick={() => resetPassword(user)}
 					>
-						Reset password
+						{m.adminReset}
 					</button>
 					{#if user.passkeyCount > 0}
 						<button
@@ -148,7 +181,7 @@
 							disabled={busy !== null}
 							onclick={() => clearPasskeys(user)}
 						>
-							Remove passkeys
+							{m.adminRemovePasskeys}
 						</button>
 					{/if}
 					<button
@@ -157,7 +190,7 @@
 						disabled={busy !== null}
 						onclick={() => setAdmin(user, !user.isAdmin)}
 					>
-						{user.isAdmin ? 'Remove admin' : 'Make admin'}
+						{user.isAdmin ? m.adminUnmakeAdmin : m.adminMakeAdmin}
 					</button>
 					{#if user.isActive}
 						<button
@@ -166,7 +199,7 @@
 							disabled={busy !== null}
 							onclick={() => setActive(user, false)}
 						>
-							Disable
+							{m.adminDisable}
 						</button>
 					{:else}
 						<button
@@ -175,7 +208,7 @@
 							disabled={busy !== null}
 							onclick={() => setActive(user, true)}
 						>
-							Enable
+							{m.adminEnable}
 						</button>
 					{/if}
 				</div>
@@ -183,18 +216,18 @@
 		{/each}
 	</ul>
 
-	<button class="z-btn" type="button" onclick={() => (creating = true)}>New person</button>
+	<button class="z-btn" type="button" onclick={() => (creating = true)}>{m.adminNew}</button>
 </div>
 
-<Sheet open={creating} title="New person" onclose={() => (creating = false)}>
+<Sheet open={creating} title={m.adminNew} onclose={() => (creating = false)}>
 	<Banner message={error} />
 	<form onsubmit={createUser}>
-		<label class="sr-only" for="new-username">Username</label>
+		<label class="sr-only" for="new-username">{m.adminUsername}</label>
 		<!-- svelte-ignore a11y_autofocus -->
 		<input
 			class="z-field"
 			id="new-username"
-			placeholder="Username"
+			placeholder={m.adminUsername}
 			maxlength="32"
 			autocapitalize="none"
 			autocorrect="off"
@@ -202,32 +235,41 @@
 			autofocus
 			bind:value={newUsername}
 		/>
-		<label class="sr-only" for="new-display">Name shown in the app</label>
+		<label class="sr-only" for="new-display">{m.adminDisplayName}</label>
 		<input
 			class="z-field"
 			id="new-display"
-			placeholder="Name shown in the app"
+			placeholder={m.adminDisplayName}
 			maxlength="60"
 			bind:value={newDisplayName}
 		/>
 		<label class="check">
 			<input type="checkbox" bind:checked={newIsAdmin} />
-			<span>Can manage accounts</span>
+			<span>{m.adminCanManage}</span>
 		</label>
 		<button class="z-btn" type="submit" disabled={busy !== null || newUsername.trim().length === 0}>
-			{busy === 'create' ? 'Creating…' : 'Create account'}
+			{busy === 'create' ? m.adminCreating : m.adminCreate}
 		</button>
 	</form>
 </Sheet>
 
-<Sheet open={reveal !== null} title="Give them this password" onclose={() => (reveal = null)}>
+<Sheet open={reveal !== null} title={m.adminPasswordTitle} onclose={closeReveal}>
 	{#if reveal}
-		<p class="z-meta">
-			This is the only time it will ever be shown — it is not stored anywhere. {reveal.who} will have
-			to choose their own password the first time they sign in.
-		</p>
+		<p class="z-meta">{m.adminPasswordBody(reveal.who)}</p>
 		<p class="password">{reveal.password}</p>
-		<button class="z-btn" type="button" onclick={() => (reveal = null)}>I have written it down</button>
+		<button
+			class="z-btn z-btn--secondary copy"
+			type="button"
+			onclick={copyPassword}
+			aria-live="polite"
+		>
+			{copied === 'ok'
+				? m.adminPasswordCopied
+				: copied === 'failed'
+					? m.adminPasswordCopyFailed
+					: m.adminPasswordCopy}
+		</button>
+		<button class="z-btn" type="button" onclick={closeReveal}>{m.adminPasswordDone}</button>
 	{/if}
 </Sheet>
 
@@ -333,5 +375,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
+	}
+
+	/* §8 of PROJECT.md: never below 44px. `z-btn` already clears it; the margin
+	   is what keeps the two stacked buttons from reading as one control. */
+	.copy {
+		margin-bottom: 10px;
 	}
 </style>

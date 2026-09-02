@@ -6,19 +6,24 @@ import { actorOf, handle, ok, readJson } from '$lib/server/domain/responses';
 
 export const PATCH: RequestHandler = async ({ locals, params, request }) =>
 	handle(async () => {
-		actorOf(locals);
+		const actor = actorOf(locals);
 		const body = await readJson(request);
-		const result = updateItem(getDb(), params.itemId, {
-			...(Object.hasOwn(body, 'name') ? { name: body.name } : {}),
-			...(Object.hasOwn(body, 'note') ? { note: body.note } : {}),
-			version: body.version
-		});
+		const result = updateItem(
+			getDb(),
+			params.itemId,
+			{
+				...(Object.hasOwn(body, 'name') ? { name: body.name } : {}),
+				...(Object.hasOwn(body, 'note') ? { note: body.note } : {}),
+				version: body.version
+			},
+			actor
+		);
 		return ok({ item: result.item, rev: result.rev });
 	});
 
 export const DELETE: RequestHandler = async ({ locals, params }) =>
 	handle(() => {
-		actorOf(locals);
-		const result = deleteItem(getDb(), params.itemId);
+		const actor = actorOf(locals);
+		const result = deleteItem(getDb(), params.itemId, actor);
 		return ok({ item: result.item, rev: result.rev });
 	});

@@ -101,13 +101,25 @@ export class RateLimiter {
 	}
 }
 
-/** The five buckets of §3.7, keyed and limited exactly as the table states. */
+/**
+ * The five buckets of §3.7, keyed and limited exactly as the table states, plus
+ * one added by the M6 audit (§8.7).
+ *
+ * `pushSubscribeByActor` exists because `POST /api/push/subscription` writes a
+ * row keyed by a client-supplied URL, which is the only endpoint in the app
+ * where an authenticated member can create unbounded rows AND choose a host the
+ * server will later make an outbound request to. The row cap in
+ * `upsertSubscription` is the real bound; this stops a member reaching it in a
+ * tight loop, and mirrors `adminUserCreateByActor`. A real browser registers
+ * once per install.
+ */
 export const limiters = {
 	loginByUsername: new RateLimiter(10, 15 * MINUTE),
 	loginByIp: new RateLimiter(300, 15 * MINUTE),
 	passkeyAssertionByIp: new RateLimiter(300, 15 * MINUTE),
 	passkeyOptionsByIp: new RateLimiter(300, 15 * MINUTE),
-	adminUserCreateByActor: new RateLimiter(20, HOUR)
+	adminUserCreateByActor: new RateLimiter(20, HOUR),
+	pushSubscribeByActor: new RateLimiter(30, HOUR)
 };
 
 export function resetAllLimiters(): void {

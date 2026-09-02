@@ -1030,3 +1030,206 @@ alongside D-036: that entry argued the reviewer catches what execution cannot, a
 the sharpest case — every one of these findings sat under a green suite, and the blocking one sat
 under a green suite in the milestone this project treats as its most security-sensitive. The three
 sweeps run before it were all run by whoever wrote the code, on the code they had just written.
+
+---
+
+# M6 — claims, visibility, locale and push
+
+Five features asked for by the owner, in one milestone. They are unrelated to each other, and that is
+worth saying up front: nothing below is a step towards something else. Each decision stands alone.
+
+## D-038 — Web push: `web-push`, and a VAPID keypair the app generates for itself
+
+`BACKLOG.md` deferred push with a one-line reason: *"Web Push needs VAPID keys and a subscription
+table, and iOS requires the PWA to be installed first."* Two of those three are now paid for; the
+third is a fact about iOS and is surfaced in the UI rather than worked around.
+
+**The keypair is generated on first use and stored in `server_keys`, not provisioned.** This is the
+first secret this application has ever held, and PROJECT.md §7 said flatly *"There is no application
+secret. Nothing to provision, rotate, or leak."* That sentence is now false as written, so it is
+corrected rather than quietly left standing. What made it valuable, though, was never the absence of
+bytes — it was the absence of an **operator step**: no `openssl` invocation in a README, no value
+pasted into a compose file, nothing to forget when moving the deployment. Generating the keypair
+lazily preserves exactly that, and puts the bytes in the one place the deployment already treats as
+durable and already backs up.
+
+Rejected: an env var holding the private key (reintroduces the operator step, and puts a secret in a
+file that gets copied around); a key file next to the database (a second thing to back up, and the
+first time somebody restores only the `.sqlite` every subscription silently stops working).
+
+**`web-push` rather than hand-rolled RFC 8291.** Node 26 has everything needed — P-256 ECDH, HKDF,
+AES-128-GCM — and the encryption is perhaps 150 lines. It is also exactly the kind of code that is
+wrong in a way no test written by its author will catch, and the failure mode is silent: a
+notification that never arrives, or worse, one encrypted under a scheme that a push service accepts
+today. The project's own rule about crypto primitives (D-037: some properties are invisible to
+black-box tests) argues *against* writing this ourselves. `web-push` is pure JavaScript, so D-002's
+"no native module to compile" survives; it is the first runtime dependency added since M2.
+
+**Consequence for the threat model.** A database disclosure now yields something usable: the VAPID
+private key lets the holder send notifications to family devices that already subscribed. That is a
+real downgrade from "a database disclosure yields no usable session" (D-004) and it should be stated
+plainly rather than buried. It does **not** let them read anything, and it does not authenticate them
+to the app. Rotation is `DELETE FROM server_keys WHERE name='vapid'` plus a restart, which
+invalidates every existing subscription and asks every member to re-enable — an acceptable recovery
+because the population is under ten people.
+
+## D-039 — Anti-spam: a trailing quiet window per store, not a per-notification cooldown
+
+The requirement was *"only send if something new is added and there hasn't been a change for X
+minutes."* Two mechanisms satisfy that sentence and they behave very differently.
+
+A **leading-edge cooldown** ("send now, then suppress for X minutes") delivers instantly and then
+throws away everything that follows. The buzz says *"Migros: milk"* and the four things added
+afterwards are never mentioned. It is the same number of interruptions with less information in them.
+
+A **trailing quiet window** — R-21, what is built — holds the batch until the list has stopped
+changing, then sends *"Migros: milk, bread and 4 more."* The message is the interesting one precisely
+because it did not exist until the person finished typing. The cost is latency: with the default
+five-minute window, a notification arrives five minutes after the last edit. For a shopping list that
+is nothing; nobody is dispatched by push.
+
+The clamp matters as much as the window. Without `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES`, one member adding
+something every four minutes across an evening starves the batch forever, and the anti-spam
+mechanism silently becomes an anti-notification mechanism. Thirty minutes is the ceiling on how far
+a batch's deadline can be pushed from when it was armed.
+
+Only **adds** arm a batch; every other write merely extends one that already exists. Ticking a whole
+list nobody added to today sends nothing, which is right — the person ticking is standing in the shop
+and everyone else already knows what is on the list.
+
+The state is in memory and dies with the process, exactly like D-007's rate-limit buckets. Persisting
+it would mean a row written on the add path — the hot path — to protect a notification nobody is yet
+waiting for.
+
+## D-040 — Visibility is one nullable column, and there is no admin override
+
+`stores.private_to`: `NULL` is public, non-`NULL` is private to that user. One column rather than a
+`visibility` enum beside an `owner_id`, because two columns need a table-level `CHECK` to stay
+consistent and **`ALTER TABLE` cannot add one** (measured; §8.1). With one column the inconsistent
+state is unwritable rather than merely checked — which is the same reasoning as D-018 and the partial
+unique index on `trips`.
+
+**An invisible store 404s, and the 404 is byte-identical to the one a fabricated id produces.** A
+`403` would confirm that a store with that id exists and belongs to someone, which is the single fact
+the feature exists to hide. This extends to name collisions: `409 STORE_NAME_TAKEN` normally carries
+the colliding store's id so the client can offer to un-archive it, and against an invisible store it
+must not (R-22).
+
+**Admins are not exempt.** The owner asked for *"ONLY VISIBLE TO THAT SPECIFIC USER"*, and an admin
+bypass makes that sentence false — in a household where the admin is a family member, it makes it
+false in exactly the case the member cares about. The cost is real and is documented rather than
+mitigated: if a member privatises a shared store and stops using the app, **no API call brings it
+back**. Recovery is `UPDATE stores SET private_to = NULL WHERE id = …` against the database, which is
+in `README.md`. That is an acceptable trade at ten users with shell access to the server; it would not
+be at a hundred.
+
+Rejected: a per-store ACL table (multi-user sharing was not asked for, and every store query would
+grow a join); reusing `created_by` as the owner (it is `ON DELETE SET NULL` and nullable, so a store
+could become private-to-nobody).
+
+## D-041 — A claim belongs to the trip, so nothing has to expire it
+
+*"Not permanently, just for a trip."* The columns therefore live on `trips`, not on `stores`.
+
+R-6 already opens a fresh trip whenever one closes, and a fresh trip's claim columns are `NULL`. So
+the claim expires exactly when the shopping run ends, with **no timer, no TTL and no background
+sweep** — the thing that ends it is the thing the member was going to do anyway. This is the same
+shape of argument as D-009: put the state where the lifecycle already is.
+
+It also gives history for free. A closed trip keeps its claim, so `GET /api/trips/{id}` can say who
+did that shop and what they said they were picking up, without an audit table (which the backlog
+rejects for exactly the reason that nothing would read it).
+
+`takeover: true` rather than a silently-stealable claim: a claim you can overwrite without noticing
+is not a claim. A plain `POST` against someone else's claim is `409 TRIP_CLAIMED` whose message names
+the holder, so the client can offer *"take over anyway"* in one tap without a second round trip.
+
+The note is 140 characters of plain text. It is a *"I'll only get the milk"* note, not a message
+board — the backlog's rejection of chat features stands.
+
+## D-042 — Locale is a user column, negotiated from `Accept-Language` exactly once
+
+`users.locale`, not a cookie and not a per-request header read.
+
+The forcing constraint is push. A notification is composed **on the server, for a recipient who is
+not the person whose action triggered it**, and quite possibly while that recipient's phone is
+asleep. There is no request to read a header from and no client available to do the translating. The
+recipient's language therefore has to be a fact the server holds about the person, which means a
+column.
+
+Reading `Accept-Language` per request would also make the same account render differently on two
+devices, and would make push text depend on whichever device last happened to make a request. So the
+header is consulted once, when the account is created, to choose a sensible initial value; after that
+the column is the only source, and the member changes it on `/you`.
+
+Delivered by the root `load` so the first paint is already in the right language. PROJECT.md §13
+records the theme-flash bug of exactly this shape; reproducing it for language would be worse, since
+a flash of the wrong *language* is a flash of an unreadable app.
+
+No i18n library. Three languages and a few hundred strings is a typed object and a `t()`; a library
+would add a dependency, a build step or a runtime store to a project whose whole stack argument is
+that it has none of those.
+
+## D-043 — The store-edit sheet, built now because visibility needed a home
+
+`PATCH /api/stores/{id}` has implemented and tested rename, recolour, reorder and archive since M1,
+and **no screen has ever called any of it** — recorded in PROJECT.md §13, in `BACKLOG.md`, and
+independently by the M3 audit. Visibility is a fifth field on that same endpoint and needs somewhere
+to live.
+
+Building a sheet that exposes only `visibility` while four tested operations sat next to it unreached
+would have been the wrong shape of decision — the cost of the sheet is the sheet, not the fields on
+it. Wiring all five closes a documented gap and makes R-14's un-archive promise load-bearing for the
+first time, which it has never been: nothing could archive a store, so nothing needed to un-archive
+one.
+
+This is the one place in M6 where scope was deliberately widened beyond what was asked for, and it is
+recorded here so that is visible rather than discovered later in a diff.
+
+## D-044 — Acting on the M6 audit: scope uniqueness to visibility, and cap what a member can create
+
+The M6 reviewer found one blocking issue and nine others. Three of them changed the design rather than
+the code, and those are the ones worth recording.
+
+**Uniqueness must have the same scope as visibility, or the constraint becomes an oracle.**
+`stores.name_key` was `UNIQUE` table-wide, so a member could type a name, read
+`409 STORE_NAME_TAKEN`, see no such shop in their own list, and conclude that somebody had a *private*
+shop called that. R-22 had carefully withheld the store's **id** while the response handed over its
+**name**, which is the more sensitive of the two — "Eczane" says something the id never could. The
+same table-wide key also meant two members could not both have a shop called Migros if either kept
+theirs private, which is a usability bug the family would have hit in the first week.
+
+The fix namespaces the key — `<ownerId> U+001F <name>` for a private store, the bare name for a public
+one — rather than replacing the constraint. That is not the tidiest option and it was chosen after the
+tidy one turned out to be dangerous: `name_key TEXT NOT NULL UNIQUE` is a **column** constraint, so
+SQLite implements it with an implicit index that cannot be dropped, so replacing it needs the
+twelve-step table rebuild, so it needs `PRAGMA foreign_keys=OFF` — **which is a no-op inside a
+transaction.** The migration runner is transactional by design (D-003), so the rebuild would have run
+with foreign keys on, and `DROP TABLE stores` would have performed an implicit delete cascading through
+`trips` into `items`. Every shopping list in the database, deleted, to tidy up an index.
+`storeName` now rejects control characters so the delimiter cannot be forged.
+
+The same reasoning applies to the **default colour**, which read every active store in the table:
+create a store with no colour and the key you are handed says which keys are taken by stores you
+cannot see, and past the eighth it leaks their count outright. The comment there previously called the
+lack of filtering deliberate, on the grounds that filtering would make two members' palettes drift
+apart. That is not a cost for a feature whose entire purpose is that two members see different worlds.
+
+**Anything a member can create needs a bound, and `POST /api/push/subscription` had none.** `endpoint`
+is a client-supplied URL and is the row's identity, so every distinct URL was a new row on the `/data`
+volume — and `deliverBatch` then makes one serial outbound HTTPS request per row, to hosts the member
+chose, on every batch. The reasoning `MAX_ITEMS_PER_TRIP` records in §3.5 applies word for word and had
+simply not been carried across to the new endpoint: the stated threat model is that every account
+holder is a person who could be careless or compromised. Twelve devices per member, plus a per-actor
+token bucket, and both are checked on the create path only so an idempotent re-registration still
+works at the limit.
+
+**And one finding was declined, which is also a decision.** A `tripId` belonging to another store
+answers `409 TRIP_ALREADY_CLOSED` where an invented one answers `404`, so the two are distinguishable
+across the visibility boundary. §8.4 is written as an absolute, so this looks like a hole — but **R-6
+step 1 of the frozen §2 mandates that 409 in exactly those words**, reaching it requires guessing a v4
+UUID, and it discloses nothing beyond "some trip has this id". The contract is not edited to match an
+implementation, and an implementation is not changed out from under a frozen rule on the strength of an
+unreachable finding. What was wrong was §8.4's claim to be absolute, so **the correction went into
+I-18**, which now names this and the SSE stream as its two carve-outs. An invariant that overstates
+what is enforced is worse than one nobody enforces, because it is trusted.

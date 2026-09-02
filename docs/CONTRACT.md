@@ -4,6 +4,12 @@ Status: **frozen at M0.** Every agent builds against this file and nothing else.
 wrong, ambiguous, or missing, stop and report it to the orchestrator. Do not work around it, and do
 not edit this file to match your implementation.
 
+**§8 is an addendum, frozen at the start of M6**, adding trip claims, store visibility, per-user
+locale and web push. §1–§7 are unchanged and still normative. If you are touching stores, items,
+trips, `/api/me` or notifications, read §8 as well — it adds invariants I-14…I-18, rules R-18…R-22, an
+authorization rule that applies to **every** store-scoped endpoint (§8.4), and rows to the §3.0
+write-effects table (§8.9).
+
 Conventions used throughout:
 
 - All timestamps are **integer epoch milliseconds, UTC**. Never store local time, never store ISO text.
@@ -545,7 +551,7 @@ user is a `500`, and a `500` on a 250-character paste into the add sheet is a de
 |---|---|---|
 | item `name` | `POST /items`, `PATCH /items/{id}` | trim; 1–200 chars after trimming |
 | item `note` | same | trim; `null` or empty-after-trim is stored as `NULL`; max 500 |
-| store `name` | `POST /stores`, `PATCH /stores/{id}` | trim; 1–60 |
+| store `name` | `POST /stores`, `PATCH /stores/{id}` | trim; 1–60; **no control characters** (added by M6 — see §8.4a) |
 | passkey `label` | `passkey/register/verify` | trim; 1–64 |
 | `username` | `POST /admin/users` | trim; 1–32; `[a-z0-9._-]+` after lowercasing; `username_key` is the lowercased form |
 | `displayName` | `POST`/`PATCH /admin/users` | trim; 1–60 |
@@ -1251,3 +1257,401 @@ around.
 Note on identifiers: item and trip responses carry **display names**, not user ids. There is no
 endpoint that maps an id to a user for a non-admin, so no id is exposed that a member could use to
 probe the account list.
+
+---
+
+## 8. Addendum 2 — claims, visibility, locale and push (migration 002)
+
+Status: **frozen at the start of this milestone (M6).** §1–§7 above are unchanged and still normative;
+this section is additive and is normative for everything it names. Where a shape in §7 gained a field,
+the authoritative TypeScript is `src/lib/types.ts`, and the field is listed here.
+
+Same rule as the header: if something here is wrong, ambiguous or missing, **stop and report it**.
+
+### 8.1 Migration 002 — the DDL delta
+
+Complete file: `src/lib/server/db/migrations/002_claims_visibility_locale_push.sql`. Every statement is
+additive; no existing column, index or constraint is altered or dropped.
+
+| Change | Shape |
+|---|---|
+| `users.locale` | `TEXT NOT NULL DEFAULT 'en' CHECK (locale IN ('en','tr','de'))` |
+| `stores.private_to` | `TEXT REFERENCES users(id)` — **NULL means public**. `ON DELETE` is absent (NO ACTION) on purpose. |
+| *(migration 003)* `stores.name_key` | Re-keyed for existing private stores: `private_to \|\| char(31) \|\| name_key`. See §8.4a. |
+| `trips.claimed_by` | `TEXT REFERENCES users(id) ON DELETE SET NULL` |
+| `trips.claimed_at` | `INTEGER` |
+| `trips.claim_note` | `TEXT CHECK (claim_note IS NULL OR (length(trim(claim_note)) > 0 AND length(claim_note) <= 140))` |
+| `push_subscriptions` | new table, see the DDL. `endpoint` is `UNIQUE` **table-wide**, not per user. |
+| `server_keys` | new table, `name` constrained to `('vapid')`. |
+
+Measured on this build before the migration was written: `ALTER TABLE … ADD COLUMN` accepts a
+column-level `CHECK` and a `REFERENCES` clause whose default is `NULL`, and both are enforced
+afterwards (`err.errcode & 0xff === 19`). What it **cannot** add is a **table-level** `CHECK`. That is
+why I-16 below is test-bound rather than schema-bound; it is a limitation of `ALTER TABLE`, not a
+choice.
+
+### 8.2 Invariants I-14 … I-18
+
+Following §1.2's convention, each says who enforces it.
+
+- **I-14 (schema).** `users.locale` is one of `en`, `tr`, `de`. Enforced by `CHECK`.
+- **I-15 (schema).** `stores.private_to` is either `NULL` or an existing `users.id`. Enforced by the
+  foreign key. A user row that a private store points at cannot be deleted.
+- **I-16 (test).** A trip is claimed **iff** `claimed_by IS NOT NULL`. `claimed_at` is non-NULL whenever
+  `claimed_by` is, and all three claim columns are written by one `UPDATE` and cleared by one `UPDATE`.
+  Test-bound because `ALTER TABLE` cannot add a table-level `CHECK` (8.1). **Readers must treat
+  `claimed_by IS NULL` as unclaimed regardless of the other two columns** — that is what keeps a
+  vestigial `claimed_at` left behind by `ON DELETE SET NULL` from resurrecting a claim owned by nobody.
+- **I-17 (schema).** At most one `push_subscriptions` row per `endpoint`, across all users. Enforced by
+  `UNIQUE`. Re-registering an endpoint that belongs to another user **moves** it (§8.7).
+- **I-18 (test).** Every store-scoped read and write is filtered by visibility (§8.4) before anything
+  else happens. No endpoint discloses a private store's **id, name, colour or contents** to a member
+  who does not own it, and the 404 it produces is byte-identical to the 404 for a store that never
+  existed.
+
+  **Corrected after the M6 audit, which found this invariant asserted more than the system delivers.**
+  The original wording — "not a name collision" — was false: `stores.name_key` was UNIQUE table-wide,
+  so typing a private store's name returned `409 STORE_NAME_TAKEN` and revealed the name. That is now
+  fixed in the code rather than excused in the text (migration 003, §8.4a), and the invariant is true
+  as it stands. Two carve-outs remain, and they are stated rather than hidden:
+
+  1. **The SSE stream reveals that *some* store changed, and when.** Hints are broadcast to every
+     stream (§8.4, "Realtime"), so a member receives `store.changed` for a store they cannot see, and
+     may infer that one exists and is being edited. The id in the hint is a v4 UUID that is useless to
+     them — every endpoint answers 404 — and per-user filtering would mean the stream carrying data,
+     which D-011 rejects for stronger reasons. **Existence and edit timing are observable; id, name,
+     colour and contents are not.**
+  2. **A `tripId` from another store is `409`, not `404`** — mandated verbatim by R-6 step 1 of the
+     frozen §2, and reachable only by guessing a v4 UUID. §8.4's table is otherwise absolute; this is
+     the one documented exception to it.
+
+  An invariant nobody enforces is a comment (§1.2). An invariant that overstates what is enforced is
+  worse, because it is trusted.
+
+### 8.3 Rollover rules R-18 … R-22
+
+- **R-18 — a claim belongs to a trip, and dies with it.** `POST /api/stores/{id}/claim` writes
+  `claimed_by`, `claimed_at` and `claim_note` on the store's **open** trip. R-6 opens a fresh trip on
+  close and a fresh trip's claim columns are `NULL`, so a claim expires exactly when the shopping run
+  ends. Nothing clears a claim on a timer, and closing a trip does not "release" anything — the claim
+  stays on the closed trip as history, which is how `GET /api/trips/{id}` can say who did the shopping.
+- **R-19 — claiming is not exclusive by accident.** Claiming a trip that is already claimed by someone
+  else is `409 TRIP_CLAIMED`, unless the request carries `takeover: true`, which overwrites the claim.
+  The same member re-claiming their own trip is **not** a conflict: it updates the note. A claim taken
+  over is not recorded anywhere; the previous holder simply stops being the holder.
+- **R-20 — releasing is the holder's, and only the holder's.** `DELETE /api/stores/{id}/claim` clears
+  the three columns. Only the current holder may call it; anyone else gets `403 FORBIDDEN`. Releasing
+  an unclaimed trip is an idempotent success that bumps nothing and emits nothing.
+- **R-21 — added items notify once the list goes quiet.** An add arms a per-store batch. Any further
+  write to that store (add, tick, untick, edit, delete, claim, release, close) pushes the batch's
+  deadline out by `ZEMBIL_NOTIFY_QUIET_MINUTES`, clamped so the deadline is never later than
+  `armedAt + ZEMBIL_NOTIFY_MAX_DELAY_MINUTES`. When the deadline passes, **one** notification is sent
+  describing everything added during the window. Only adds arm a batch; a write to a store with no
+  armed batch notifies nothing. Module surface: §8.8.
+- **R-22 — a private store is invisible, not merely read-protected.** Setting `stores.private_to`
+  removes the store from every other member's world in one step: it disappears from `GET /api/stores`,
+  its list and trips return `404 STORE_NOT_FOUND`, and its items return `404 ITEM_NOT_FOUND`. Items
+  already on it stay on it. Making it public again restores it, unchanged, to everyone.
+
+  **A private store reserves nothing in anybody else's namespace.** Its name is not taken from them,
+  and its colour is not taken from their palette (§8.4a). Making a store private, or public again, can
+  therefore fail with `409 STORE_NAME_TAKEN` if the name is already in use in the namespace it is
+  moving *into* — the transition is refused whole and the row is left exactly as it was.
+
+  **Superseded clause, recorded rather than deleted.** R-22 originally said a collision against an
+  invisible store was `409 STORE_NAME_TAKEN` *without* the `storeId` sibling field. The M6 audit
+  pointed out that this still discloses the private store's **name**, which is a worse leak than the
+  id being withheld, and that it contradicted I-18 outright. §8.4a fixes the cause; the clause is now
+  unreachable because an invisible collision cannot occur.
+
+### 8.4 Visibility — the authorization rule, stated once
+
+> A store is **visible** to a member when `stores.private_to IS NULL` **or** `stores.private_to = <the
+> session's user id>`. Nothing else grants visibility. **Being an admin does not.**
+
+Every store-scoped endpoint resolves visibility from `locals.user.id` and nothing else, **before** any
+other check, and an invisible store is reported exactly as a non-existent one:
+
+| Endpoint | On an invisible store |
+|---|---|
+| `GET /api/stores` | The row is absent from the array. |
+| `PATCH /api/stores/{id}` | `404 STORE_NOT_FOUND` |
+| `GET /api/stores/{id}/list` | `404 STORE_NOT_FOUND` |
+| `POST /api/stores/{id}/items` | `404 STORE_NOT_FOUND` |
+| `POST /api/stores/{id}/trips/close` | `404 STORE_NOT_FOUND` |
+| `GET /api/stores/{id}/trips` | `404 STORE_NOT_FOUND` |
+| `POST|DELETE /api/stores/{id}/claim` | `404 STORE_NOT_FOUND` |
+| `PATCH|DELETE /api/items/{id}`, `tick`, `untick` | `404 ITEM_NOT_FOUND` |
+| `GET /api/trips/{id}` | `404 TRIP_NOT_FOUND` |
+
+`404`, never `403`: a `403` on a private store tells the caller a store with that id exists and belongs
+to somebody, which is the one fact the feature is for hiding. The `404` an invisible store produces is
+byte-identical to the `404` a fabricated id produces.
+
+**Realtime (§4) obeys the same rule.** `store.changed` and `stores.changed` are broadcast to every
+stream, and this stays correct only because they are hints and carry no data (D-011): a member who
+receives a hint for a store they cannot see refetches and is told `404`, or simply does not find the
+store in `GET /api/stores`. A `storeId` in a hint is not a disclosure of anything a member could not
+have guessed. **Do not "optimise" this into per-user filtering that carries store names.**
+
+### 8.4a Name and colour namespaces (migration 003)
+
+Uniqueness has to have the **same scope as visibility**, or the `UNIQUE` constraint becomes an oracle.
+
+`stores.name_key` is therefore namespaced by the owner for a private store:
+
+| Visibility | `name_key` |
+|---|---|
+| public | `<normalized name>` |
+| private to `U` | `U` + `U+001F` + `<normalized name>` |
+
+so public names stay unique among public stores, each member's private names stay unique to that
+member, and the two spaces never meet. `name_key` remains `UNIQUE` table-wide — a partial index would
+need the column constraint dropped, which needs a table rebuild, which needs `PRAGMA foreign_keys=OFF`,
+which is a **no-op inside a transaction**; the migration runner is transactional by design, so the
+rebuild would run with foreign keys on and `DROP TABLE stores` would cascade every trip and item away.
+Namespacing needs no rebuild.
+
+**`storeName` therefore rejects control characters** (an addition to §3.1a's row for store `name`):
+`U+001F` is the delimiter, and a name carrying one could be crafted to land in another member's key
+space. `400 VALIDATION_FAILED`.
+
+`name` and `visibility` are resolved **together** in `PATCH /api/stores/{id}`: changing either changes
+the key, and the collision check runs on the key the row is about to hold.
+
+**The default colour is scoped the same way.** `POST /api/stores` picks the first palette key not in
+use by an active store **visible to the caller**. Unscoped, it is an existence oracle — create a store
+with no colour and the key you are handed says which keys stores you cannot see are using, and past the
+eighth it leaks their count. Two members' palettes drifting apart is the correct behaviour for a
+feature whose purpose is that they see different worlds.
+
+**There is no admin escape hatch, by design and with a cost.** If a member makes a shared store private
+and then stops using the app, no API call any other member or admin can make will bring it back;
+recovery is `UPDATE stores SET private_to = NULL WHERE id = …` against the database. This is documented
+in `README.md` and is the deliberate price of "only visible to that specific user" meaning it.
+
+### 8.5 Locale — §3.2 delta
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| PATCH | `/api/me` | session | Set the caller's own interface language |
+
+`PATCH /api/me` request `{ "locale": "en" | "tr" | "de" }` → `200 { "user": User }`. An unknown value is
+`400 VALIDATION_FAILED`. It sets the **caller's own** locale and reads the target id from the session;
+there is no path or body parameter naming a user, at any privilege level.
+
+`GET /api/me` and every other `User` in a response now carry `locale`. §3.0: this write bumps nothing
+and emits nothing — no shopping state changed, and the only client that cares is the one that made it.
+
+The gate in §3.2 is unchanged: `PATCH /api/me` is on the same route id as `GET /api/me` and therefore
+inherits its `PASSWORD_GATE_EXEMPT` entry.
+
+`users.locale` is the **server's** copy and the one that matters: push notification text (§8.7) is
+composed on the server for a recipient who is not the person who triggered it, so it cannot be
+translated by the client that displays it. The client renders from the same catalogues.
+
+**The locale is delivered by the root `load`, and the document is labelled with it.** `app.html`
+carries `lang="%zembil.lang%"`, substituted per request in `hooks.server.ts` via `transformPageChunk`,
+so the SSR'd document is already in the right language on the first paint — the theme-flash bug
+recorded in PROJECT.md §13 has exactly this shape and a flash of the wrong *language* is worse. A
+language change made inside the app is a client-side navigation, which re-renders the body but not
+`<html>`, so the root layout also sets `document.documentElement.lang` in an effect. Both halves are
+required; either alone leaves the attribute disagreeing with the text under it.
+
+**Locale never comes from a header at request time.** `Accept-Language` is consulted exactly once, when
+a member's account is created, to pick the initial value; after that the column is the only source. A
+per-request header would make the same account render differently on two devices and would make the
+push text depend on whichever device last made a request.
+
+### 8.6 Claims — §3.4 delta
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/stores/{storeId}/claim` | session | "I'm going to this shop" |
+| DELETE | `/api/stores/{storeId}/claim` | session | Release it |
+
+`POST` request `{ "tripId": string, "note"?: string | null, "takeover"?: boolean }`.
+
+- `tripId` is **required** and is the same staleness guard as `trips/close` (§3.5): a missing or
+  non-string `tripId` is `400 VALIDATION_FAILED`; a well-formed `tripId` that is not the store's open
+  trip is `409 TRIP_ALREADY_CLOSED` with the `openTripId` sibling field. A `tripId` that never existed
+  is `404 TRIP_NOT_FOUND`.
+- `note` is optional free text, **1–140 characters** after §3.1c trimming, `null` or empty-after-trim
+  clears it. It is plain text and is rendered as plain text; it is never HTML and never a link.
+- **Editing your own note preserves `claimed_at`.** "Ayşe has been shopping since 18:04" is the fact
+  worth keeping, and rewriting the timestamp on a note edit silently moves it. A fresh claim and a
+  takeover both start the clock; only the holder editing their own note does not. All three columns
+  are still written by one `UPDATE` (I-16).
+- `takeover` defaults to `false`. Claiming a trip held by **someone else** without it is
+  `409 TRIP_CLAIMED`, whose `message` names the current holder (a display name, never an id) so the
+  client can offer "take over anyway" without a second round trip. With `takeover: true` the claim is
+  overwritten. Re-claiming a trip **you already hold** is never a conflict — it updates the note.
+- `200 → { "store": StoreSummary, "trip": Trip }`.
+
+**A note on both claim endpoints and `PATCH /api/stores/{id}`:** the `{ store, trip }` they return is
+read **after** the transaction commits, so if another member privatises the store in that window the
+caller receives `404 STORE_NOT_FOUND` for a write that actually landed. On a single-process,
+synchronous-SQLite deployment the window is one event-loop turn and the client refetches anyway. It is
+recorded because the failure reads backwards: "you were told it did not happen, and it did".
+
+`DELETE` takes no body. Only the current holder may release: anyone else gets `403 FORBIDDEN`.
+Releasing an already-unclaimed trip is `200` and, per §3.0, bumps nothing and emits nothing.
+`200 → { "store": StoreSummary, "trip": Trip }`.
+
+`StoreSummary` and `Trip` both gain the four `Claim` fields:
+
+```ts
+type Claim = {
+  claimedByName: string | null;   // display name, never a user id
+  claimedByMe: boolean;           // computed per request from the session
+  claimedAt: number | null;
+  claimNote: string | null;
+}
+```
+
+`claimedByMe` exists because §3's "responses carry display names, never user ids" leaves the client no
+safe way to decide whether the release button is its to press — two members can share a display name.
+
+`StoreSummary` also gains `visibility: 'public' | 'private'`.
+
+`PATCH /api/stores/{storeId}` gains one field: `{ "visibility"?: "public" | "private" }`. Setting
+`private` sets `private_to` to the **caller's** id; setting `public` sets it to `NULL`. A store that is
+already private may only be patched at all by its owner (§8.4 makes it a `404` for everyone else), so
+the "who may republish it" question answers itself. Any member may privatise any store they can see.
+
+### 8.7 Web push — §3.9
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/push/key` | session | The VAPID public key, base64url |
+| GET | `/api/push/subscription` | session | Is this browser registered? |
+| POST | `/api/push/subscription` | session | Register this browser |
+| DELETE | `/api/push/subscription` | session | Unregister this browser |
+
+- `GET /api/push/key` → `{ "publicKey": string }`. The keypair is **generated on first use** and stored
+  in `server_keys`, so there is still nothing for an operator to provision (D-038). When
+  `ZEMBIL_PUSH_ENABLED` is off this is `503 PUSH_DISABLED`.
+- **At most 12 subscriptions per member.** Beyond that, `409 PUSH_DEVICE_LIMIT`. `endpoint` is a
+  client-supplied URL and is the row's identity, so without a cap one authenticated member can create
+  unbounded rows on the `/data` volume — and `deliverBatch` then makes one serial outbound HTTPS
+  request per row, to hosts that member chose, on every batch. This is `MAX_ITEMS_PER_TRIP`'s reasoning
+  verbatim (§3.5) and was missing until the M6 audit found it. The cap is checked on the **create**
+  path only, so a repeat registration of an endpoint already held still succeeds at the limit, exactly
+  as R-17's idempotent add does.
+- **`POST` is rate limited** per actor (§3.7): 30 per hour, bucket `pushSubscribeByActor`. A real
+  browser registers once per install. A `429` carries `Retry-After`, so this route uses `handleAuth`
+  rather than `handle`.
+- `POST /api/push/subscription` request `{ "endpoint": string, "keys": { "p256dh": string, "auth": string } }`
+  — exactly what `PushSubscription.toJSON()` produces, narrowed. `endpoint` must parse as an `https:`
+  URL and be ≤ 2048 characters; `p256dh` and `auth` must be non-empty base64url ≤ 256 characters.
+  Anything else is `400 VALIDATION_FAILED`. `201` on a new row, `200` when the endpoint was already
+  registered. **An endpoint already registered to another user is MOVED to the caller** (I-17): the same
+  browser profile signed in as a different member must not leave the previous member receiving that
+  device's notifications.
+- `DELETE /api/push/subscription` request `{ "endpoint": string }` → `200`, idempotent. It deletes only
+  a row belonging to the caller; an endpoint belonging to someone else is a `200` that deletes nothing,
+  because reporting the difference would let a member probe for another member's devices.
+- `GET /api/push/subscription?endpoint=…` → `{ "subscribed": boolean, "deviceCount": number }`, both
+  scoped to the caller.
+
+None of these bumps `rev` or emits an event.
+
+**Recipients.** When a batch fires for store S, the recipients are every **active** user who
+(a) is not among the batch's contributors, (b) can see S under §8.4, and (c) has at least one
+subscription row. Note what (b) means in practice: a **private store notifies nobody**, because its only
+viewer is its owner and the owner is the one adding.
+
+**Payload.** The notification is composed **server-side, per recipient, in that recipient's
+`users.locale`**, and carries the store name, up to five item names and a count. It carries no user
+ids, no item ids and no note text. The `data.url` is `/s/{storeId}` so the click opens that list.
+
+**Delivery is skipped entirely** — before any recipient is resolved — when push is disabled or no VAPID
+subject could be derived (§8.11). `DeliveryReport.skipped` names which: `'disabled'`,
+`'no-vapid-subject'`, `'store-gone'` or `'no-recipients'`.
+
+**Delivery failures.** A `404` or `410` from the push service deletes the subscription row immediately —
+that is the push service telling us the browser is gone. Any other failure increments `failure_count`
+and leaves the row. A push failure is never visible to the person whose write triggered it.
+
+### 8.8 The notifier — module surface
+
+`src/lib/server/notify/index.ts`, pinned the way §4.1 pins the bus, because two agents meet here and
+never see each other's code (D-025):
+
+```ts
+export interface AddedItem { storeId: string; actorId: string; itemName: string; }
+export interface NotificationBatch {
+  storeId: string; armedAt: number; count: number; names: string[]; actorIds: string[];
+}
+export type NotificationSink = (batch: NotificationBatch) => void | Promise<void>;
+
+export function noteItemAdded(added: AddedItem): void;      // after the add commits
+export function noteStoreActivity(storeId: string): void;   // after any other store write commits
+export function setNotificationSink(sink: NotificationSink | null): void;  // startup wiring
+export function configureNotifier(o: { quietMs: number; maxDelayMs: number }): void;
+export function flushNotifications(): void;                 // test seam only — see below
+```
+
+The domain layer calls the first two and knows nothing else about notifications. It calls them **after
+the transaction commits**, in the same place and under the same conditions as `emitStoreChanged` — an
+idempotent no-op that emits nothing also notifies nothing. `noteItemAdded` and `noteStoreActivity`
+never throw.
+
+The sink is installed by `hooks.server.ts`. With no sink installed nothing is even accumulated, which is
+what `ZEMBIL_PUSH_ENABLED=0` produces.
+
+Batches live in memory and **do not survive a restart**, exactly like the rate-limit buckets (D-007).
+`flushNotifications()` is a test seam and is deliberately **not** wired into §3.8's shutdown: `shutdown()`
+calls `process.exit(0)` synchronously after closing the database, so flushing there would start HTTPS
+requests the process is about to abandon. A batch lost to a restart is one missed notification, and the
+next add arms a new one.
+
+### 8.9 §3.0 write-effects delta
+
+Additional rows for the §3.0 table. Same rule: a write not listed bumps nothing and emits nothing, and
+an idempotent no-op does neither.
+
+| Endpoint | Bumps | Emits | Notifies |
+|---|---|---|---|
+| `POST /api/stores/{id}/items` (**new** row) | `stores.rev` | `store.changed` | `noteItemAdded` |
+| `POST /api/stores/{id}/items` (idempotent hit, R-17) | — | — | — |
+| `PATCH /api/items/{id}` | `stores.rev` | `store.changed` | `noteStoreActivity` |
+| `DELETE /api/items/{id}` (first delete) | `stores.rev` | `store.changed` | `noteStoreActivity` |
+| `POST /api/items/{id}/{tick,untick}` (state changed) | `stores.rev` | `store.changed` | `noteStoreActivity` |
+| `POST /api/items/{id}/{tick,untick}` (no change, R-4/R-5) | — | — | — |
+| `POST /api/stores/{id}/trips/close` | `stores.rev` | `store.changed` **and** `stores.changed` | `noteStoreActivity` |
+| `PATCH /api/stores/{id}` (incl. `visibility`) | `stores.rev` | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
+| `POST /api/stores/{id}/claim` (claim changed) | `stores.rev` | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
+| `POST /api/stores/{id}/claim` (same holder, same note) | — | — | — |
+| `DELETE /api/stores/{id}/claim` (was claimed) | `stores.rev` | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
+| `DELETE /api/stores/{id}/claim` (was unclaimed) | — | — | — |
+| `PATCH /api/me` | — | — | — |
+| `POST|DELETE /api/push/subscription` | — | — | — |
+
+A claim emits **both** store events for the same reason a close does: the home screen card shows the
+claim, and so does the list header.
+
+### 8.10 Error codes added
+
+`TRIP_CLAIMED` (409) · `PUSH_DISABLED` (503) · `PUSH_DEVICE_LIMIT` (409). None carries a sibling
+field; §3.1's rule that exactly three responses carry one is unchanged.
+
+### 8.11 Environment variables added — §6 delta
+
+| Name | Default | Note |
+|---|---|---|
+| `ZEMBIL_PUSH_ENABLED` | `true` | `0`/`false`/`no` turns push off. Nothing else is off. |
+| `ZEMBIL_VAPID_SUBJECT` | `ZEMBIL_ORIGIN`, **when it is https** | VAPID `sub` claim; `mailto:` or `https://`. See below. |
+| `ZEMBIL_NOTIFY_QUIET_MINUTES` | `5` | R-21's quiet window. `0` delivers immediately. |
+| `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES` | `30` | R-21's ceiling. Must be ≥ the quiet window. |
+
+`ZEMBIL_ORIGIN` remains the only required variable.
+
+**Correction, found in implementation.** RFC 8292 admits only a `mailto:` or `https:` contact URI and
+`web-push` enforces it, so "defaults to the origin" cannot hold for a plain-`http:` origin — which is
+the local development case (`http://localhost:5173`). An explicitly set value is always validated and
+a bad one crashes the process per §6's standard; the DERIVED default is the origin when it is
+`https:` and **`null` otherwise**. A null subject makes delivery skip with one log line rather than
+fabricate a contact URI, and nothing is lost that was ever going to work: a browser cannot receive
+real web push against a non-HTTPS deployment. `AuthConfig.vapidSubject` is therefore
+`string | null`, and `DeliveryReport.skipped` gains `'no-vapid-subject'`.

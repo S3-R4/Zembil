@@ -106,9 +106,14 @@ in `system-ui, sans-serif`.
 | Nav tab pill | 60px | 16px | active: `--accent-tint` |
 | Store spine | 56px × 8px | 4px | store palette colour |
 | Checkbox | 24–26px | 8px | 2.5px border |
+| Claim strip | auto (≥44px control) | 18px | M6. `--surface-muted`; sits under the list header, above the items |
+| Segmented control | 44px per button | 16px outer / 12px inner | M6. Appearance, Language, and Who-can-see-this-shop all use it |
+| Colour swatch | 44px | 14px | M6. A swatch is a tap target like any other — not the 24px dot it looks like |
+| Settings gear | 44px | 14px | M6. List header, right-aligned, `--text-2` |
 
 **Tap targets are never below 44×44 CSS px.** The list row is 68px precisely so a moving thumb cannot
-tick the wrong thing.
+tick the wrong thing. This applies to everything M6 added, including a colour swatch — the visible dot
+is 24px and the target around it is 44px.
 
 ---
 
@@ -125,8 +130,24 @@ tick the wrong thing.
 | Item detail | sheet | Item, Quantity or note, Store, Delete, Save |
 | Finish trip | confirm sheet | Bought / Left on the list / Keep shopping |
 | Trips | `/trips` | history; "See 8 items"; per-trip item preview |
-| Account | `/you` | passkeys with "Used 2 minutes ago" + Remove, Appearance Light/Auto/Dark, Sign out |
+| Account | `/you` | passkeys with "Used 2 minutes ago" + Remove; Notifications; Language; Appearance Light/Auto/Dark; Sign out |
 | Admin | `/you/admin` | "Active · 2 passkeys", "Active · password only", "Disabled 4 Aug" + Enable; New user; Reset password; Remove all passkeys; Disable user |
+
+### Added in M6
+
+| Screen | Route | Notes |
+|---|---|---|
+| Claim strip | on `/s/{storeId}` | "Nobody is going yet." / "Ayşe is shopping here." + her note; the action is "I'm going to this shop", "Change my note" or "Take over". Status first, control second — the common case is reading it |
+| Claim | sheet over list | one optional note, 140 chars, live countdown. After a `409 TRIP_CLAIMED` the same sheet becomes "Take over anyway" and names who is already going |
+| Shop settings | sheet over list | rename, recolour, **Who can see this shop** (Everyone / Only me), archive. Opened from the gear in the list header |
+| Archived shops | sheet over Shops | the only route to an archived store's id, so the only way R-14's un-archive promise is reachable |
+| Notifications | section on `/you` | on/off for this device, device count, and the reason it cannot be turned on when it cannot — permission denied, unsupported, or iOS-needs-Home-Screen |
+| Language | section on `/you` | English / Türkçe / Deutsch, each named in itself |
+| One-time password | sheet on `/you/admin` | the generated password, **Copy** (with a "Copied" / "Could not copy it" state), and "I have written it down" |
+
+A private shop is marked **"Only you"** wherever it appears — on its card and in its list header.
+A claimed shop shows who is going on the home card too; that is what stops two people driving to the
+same shop.
 
 Offline state: the store list shows "No signal" with a **Retry**; rows pending sync show
 "Waiting to sync".
@@ -144,3 +165,30 @@ Offline state: the store list shows "No signal" with a **Retry**; rows pending s
 - Ticked rows sink below the divider and use `--surface-sunk`; they never disappear.
 - Tick animation `zTick` (scale 1 → 0.86 → 1) and skeleton `zShimmer` are defined in the canvas.
   Both are wrapped in `@media (prefers-reduced-motion: no-preference)`.
+- **Copy that a translation will lengthen must not be laid out at its English width.** German is
+  routinely 30% longer than English and Turkish agglutinates; the segmented controls therefore let
+  their labels shrink rather than their layout break. This is the one design rule M6 added, and it
+  came from "Türkçe" and "Deutsch" not fitting where "Auto" did.
+- **A claim note is plain text.** It is rendered as text, never as HTML and never as a link — there
+  is no `{@html}` anywhere in this codebase and this is not the place to introduce one.
+
+---
+
+## 6. Language
+
+Three catalogues, `en` / `tr` / `de`, in `src/lib/i18n/`. Notes that are design decisions rather than
+implementation ones:
+
+- **Each language names itself in itself** in the picker — "Türkçe", not "Turkish". Somebody who has
+  landed in a language they cannot read has to be able to find their way out.
+- **Turkish counted nouns do not take the plural suffix**: "3 ürün", never "3 ürünler". The Turkish
+  catalogue supplies one form on purpose; that is correct, not lazy.
+- **No suffix is ever glued to a name.** Turkish vowel harmony needs "Migros'a" but "BİM'e", and
+  nothing can know which, so every phrase built around a shop name routes the suffix onto a fixed
+  word instead — "{shop} listesine ekle". The Turkish reads slightly longer than the English as a
+  result, and it is right for every name a family will type.
+- **German uses "Sie".** "Du" is warmer for a household app and is also the form that reads wrong to
+  exactly one family member; "Sie" reads merely neutral to everyone.
+- **Server error messages are never translated by the client.** They are written for a person
+  (CONTRACT.md §3.1) and shown as sent — a re-invented "Something went wrong" is what hides a
+  `409 STORE_NAME_TAKEN` that would have told the member what to do.

@@ -386,7 +386,11 @@ The rules that are not negotiable because they come from the brief, not from tas
   lets the dark theme remap it.
 
 Screens: `/login`, `/` (Shops), `/s/{storeId}` (List), `/trips` (History), `/you` (Account),
-`/you/admin` (Admin), plus sheets for quick-add, item detail and finish-trip.
+`/you/admin` (Admin), plus sheets for quick-add, item detail and finish-trip — and, from M6, the
+claim sheet and claim strip on the list, the shop-settings sheet behind the gear in the list header
+(rename, recolour, visibility, archive), the archived-shops sheet on the home screen, and the
+Notifications and Language sections on the account screen. `docs/DESIGN.md` §4 lists them with the
+copy each one uses.
 
 ### Service worker
 
@@ -560,7 +564,7 @@ seams that are left to convention drift.)
 | `docs/CONTRACT.md` | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — **plus §8, the M6 addendum** (migration 002, I-14…I-18, R-18…R-22, the visibility rule, claims, locale, push, the §3.0 delta). | Normative. Build against this. |
 | `docs/DECISIONS.md` | D-001 … **D-043**, each with the reasoning and what was rejected. | Why things are the way they are. |
 | `PLAN.md` | Stack, data model at a glance, file ownership, milestones with exit criteria, test strategy, known gaps. | Process record. |
-| `docs/DESIGN.md` | Colour tokens, type scale, metrics, screen list, layout rules. | Distilled from the canvas. |
+| `docs/DESIGN.md` | Colour tokens, type scale, metrics, screen list, layout rules — **and §6, the language rules** (why Turkish supplies one plural form, why no suffix is ever glued to a shop name, why German uses "Sie", and why a server error message is never translated by the client). | Distilled from the canvas. |
 | `design/Zembil.dc.html` | 22 artboards at 390×844. | **Visual source of truth** — beats `DESIGN.md`. |
 | `docs/BACKLOG.md` | Everything deliberately not built, with the reason. | Append here instead of building. |
 | `README.md` | Operator documentation: deploy, reverse proxy (Caddy/nginx/Traefik), bootstrap, accounts, passkeys, backup, restore, recovery, configuration. | For humans running it. |

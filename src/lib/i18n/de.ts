@@ -51,6 +51,7 @@ export const de: Messages = {
 	homeArchivedBody:
 		'Ein archivierter Laden behält seine Listen. Sie können ihn jederzeit zurückholen.',
 	homeRestore: 'Zurückholen',
+	homeDeleteShort: 'Löschen',
 
 	// ---- store card -----------------------------------------------------
 	cardNothingNeeded: 'Nichts nötig',
@@ -153,6 +154,22 @@ export const de: Messages = {
 	storeArchiveHelp:
 		'Er verschwindet vom Startbildschirm, gelöscht wird nichts. Unter „Archivierte Läden“ holen Sie ihn zurück.',
 	storeArchived: 'Archiviert. Zu finden unter „Archivierte Läden“.',
+
+	// ---- Laden löschen (§9.1, R-23) --------------------------------------
+	storeDelete: 'Diesen Laden löschen',
+	storeDeleteHelp:
+		'Der Laden, seine Einkäufe und alle Artikel darauf verschwinden — für alle. Das lässt sich nicht rückgängig machen.',
+	storeDeleteConfirm: (name: string) => `${name} endgültig löschen?`,
+	storeDeleteCounts: (trips: number, items: number) =>
+		`${plural(L, trips, { one: `${trips} Einkauf`, other: `${trips} Einkäufe` })} und ${plural(
+			L,
+			items,
+			{ one: `${items} Artikel`, other: `${items} Artikel` }
+		)} wurden mitgelöscht.`,
+	storeDeleteSubmit: 'Endgültig löschen',
+	storeDeleteKeep: 'Behalten',
+	storeDeleting: 'Wird gelöscht…',
+	storeDeleted: (name: string) => `${name} wurde gelöscht.`,
 
 	// ---- trips ----------------------------------------------------------
 	tripsEyebrow: 'Was wir gekauft haben',

@@ -139,11 +139,26 @@ is 24px and the target around it is 44px.
 |---|---|---|
 | Claim strip | on `/s/{storeId}` | "Nobody is going yet." / "Ayşe is shopping here." + her note; the action is "I'm going to this shop", "Change my note" or "Take over". Status first, control second — the common case is reading it |
 | Claim | sheet over list | one optional note, 140 chars, live countdown. After a `409 TRIP_CLAIMED` the same sheet becomes "Take over anyway" and names who is already going |
-| Shop settings | sheet over list | rename, recolour, **Who can see this shop** (Everyone / Only me), archive. Opened from the gear in the list header |
+| Shop settings | sheet over list | rename, recolour, **Who can see this shop** (Everyone / Only me), archive, delete. Opened from the gear in the list header |
 | Archived shops | sheet over Shops | the only route to an archived store's id, so the only way R-14's un-archive promise is reachable |
 | Notifications | section on `/you` | on/off for this device, device count, and the reason it cannot be turned on when it cannot — permission denied, unsupported, or iOS-needs-Home-Screen |
 | Language | section on `/you` | English / Türkçe / Deutsch, each named in itself |
 | One-time password | sheet on `/you/admin` | the generated password, **Copy** (with a "Copied" / "Could not copy it" state), and "I have written it down" |
+
+### Added in M7
+
+| Screen | Route | Notes |
+|---|---|---|
+| Delete a shop | bottom of the shop-settings sheet, and each row of Archived shops | Two taps on two different buttons. The first arms and shows "Delete {shop} for good?" with what it costs; the second is **Delete permanently**, next to **Keep it**. Arming does not survive closing the sheet |
+| Deletion receipt | banner on `/s` (Shops) | "Migros was deleted. 4 trips and 27 items went with it." Shown once, on the screen the member lands on, because the screen they deleted from is about to 404 |
+
+The header icon for shop settings is a **cog**. It was a circle with eight straight rays until M7,
+which reads as brightness — on most phones the icon next to it is the display setting.
+
+The words are the safety mechanism here, and they are chosen against each other: **Archive** says
+nothing is deleted and names where the shop goes; **Delete** names what goes with it and says it does
+not come back. Both sit in the same sheet, Archive first, because the reversible action should be the
+one you meet first.
 
 A private shop is marked **"Only you"** wherever it appears — on its card and in its list header.
 A claimed shop shows who is going on the home card too; that is what stops two people driving to the

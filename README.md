@@ -201,6 +201,32 @@ everyone.
 
 ---
 
+## Archiving and deleting a shop
+
+Two different actions, in the same sheet, on purpose.
+
+**Archive** takes a shop off the home screen and keeps everything: its lists, its trips, every item.
+Bring it back from **Archived shops** on the home screen whenever you want it. Nothing is lost.
+
+**Delete** is permanent. It removes the shop, every trip it ever had, and every item on them, for
+everyone, immediately. It takes two taps on two different buttons — the second one says *Delete
+permanently* and tells you what it is about to remove — and after that:
+
+> There is no undo, and no admin can bring it back. **The only recovery is your backup.**
+
+So take one before a clear-out — see **Data and backups** below for what this does and where it goes:
+
+```sh
+./scripts/backup.sh
+```
+
+Anyone who can see a shop can delete it — the same people who can archive or rename it. There is no
+owner and no admin-only gate, because this is a household of people who already share every list. The
+one limit is the visibility rule above: a shop that is private to somebody else cannot be deleted by
+anyone, admins included.
+
+---
+
 ## Notifications
 
 Members turn notifications on per device, from their account screen. Zembil then sends a push when

@@ -184,6 +184,23 @@ export function noteStoreActivity(storeId: string): void {
 }
 
 /**
+ * Drops a store's pending batch without delivering it — called when the store
+ * itself is deleted (§9.1).
+ *
+ * `deliver()` already survives a store that vanished mid-window: it resolves the
+ * name at delivery time and reports `skipped: 'store-gone'`. This is not that
+ * safety net, it is the tidier fact — the batch describes a list that no longer
+ * exists, so there is nothing to notify anyone about, and no reason to leave a
+ * timer armed for it.
+ */
+export function discardStoreNotifications(storeId: string): void {
+	const batch = pending.get(storeId);
+	if (!batch) return;
+	pending.delete(storeId);
+	if (batch.timer !== null) clearTimeout(batch.timer);
+}
+
+/**
  * Delivers every outstanding batch immediately.
  *
  * This is a TEST SEAM, and it is deliberately NOT wired into §3.8's graceful

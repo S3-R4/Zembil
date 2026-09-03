@@ -1233,3 +1233,49 @@ implementation, and an implementation is not changed out from under a frozen rul
 unreachable finding. What was wrong was §8.4's claim to be absolute, so **the correction went into
 I-18**, which now names this and the SSE stream as its two carve-outs. An invariant that overstates
 what is enforced is worse than one nobody enforces, because it is trusted.
+
+## D-045 — Deleting a store is permanent, cascades through the schema, and is not admin-gated
+
+*(M7. Contract addendum §9.)*
+
+Archiving was built as the answer to "I do not want to see this shop" and it is the right answer to
+that question. It is not an answer to "this shop was a mistake, or was for a house we moved out of,
+and I want it gone" — the row, its trips and its items stay for ever, and the archived sheet grows a
+list of things nobody will ever bring back. So `DELETE /api/stores/{storeId}` exists, and the two
+actions sit next to each other with copy that says which is which.
+
+**Three things were decided here, and each had a plausible alternative.**
+
+**The cascade is the schema's, not the application's.** Migration 001 already declared
+`trips.store_id` and `items.store_id` as `REFERENCES stores(id) ON DELETE CASCADE`, and `db/index.ts`
+already runs `PRAGMA foreign_keys = ON`. Deleting trips and items in application code first would
+have worked, would have read as more explicit, and would have been a second copy of a rule the
+database enforces atomically — the copy that goes stale the day somebody adds a table. One statement,
+and a test that counts rows in all three tables before and after.
+
+**No admin gate, and no owner of a public store.** The alternative — only an admin may delete —
+sounds safer and is not, for this brief: the household is fewer than ten people who already trust each
+other with every list, and D-007 already refused a mechanism (account lockout) that lets a family lock
+itself out of its own app. Restricting deletion would mean the person who created a shop by accident
+cannot remove it without finding whoever holds the admin flag. What *is* enforced is exactly what §8.4
+already enforces everywhere else: a store private to somebody else cannot be deleted, **and being an
+admin does not change that** (D-040 is unchanged, and now has a DELETE row in its test table).
+
+**The confirmation is in the interface, not in the protocol.** No confirmation token, no
+`?really=true`, no "type the shop name". A token in the request would be protocol surface that exists
+to compensate for a screen, and it protects nothing an API client could not send twice. What actually
+prevents the accident is that the destructive tap is a *second* tap, on a *different* button, with
+different words, and that the armed state does not survive closing the sheet. That is a UI rule, so
+§9.4 states it in the contract as a UI rule and the e2e suite asserts each clause — including that
+reopening shop settings does not leave "Delete permanently" one tap away.
+
+**The one non-obvious implementation detail** is the event. A delete cannot bump `stores.rev`, because
+the row it would bump is gone, so `store.changed` carries `rev + 1` — a number that store will never
+hold. §4's cursor rule drops any hint at or below what the client already has, so anything less would
+be silently swallowed and a member standing on `/s/{id}` would go on tapping a list the server has
+forgotten. Emitting nothing was the other option, and it is worse for the same reason.
+
+**What is not built:** an undo, a trash, a retention window, a tombstone row. Recovery is the
+operator's backup, which is what `scripts/backup.sh` is for and what the README already documents. A
+trash would be a second lifecycle to reason about in every store-scoped query — and the reversible
+option already exists next to this one, with its own button.

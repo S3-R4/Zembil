@@ -48,6 +48,10 @@ export class Shops {
 	loading = $state(false);
 	error = $state<string | null>(null);
 	loaded = $state(false);
+	/** §9.1: the receipt for the last store this session deleted, so the screen
+	 *  the member lands on afterwards can say what went. Read once and cleared
+	 *  by whoever shows it. */
+	lastDeleted = $state<StoreDeletion | null>(null);
 
 	seed(stores: StoreSummary[]): void {
 		this.stores = stores;
@@ -102,6 +106,28 @@ export class Shops {
 		await this.load();
 		return body.store;
 	}
+
+	/**
+	 * `DELETE /api/stores/{id}` — §9.1 / R-23. Permanent: the store, its trips
+	 * and every item on them. Returns what went, so the screen can say it.
+	 */
+	async remove(storeId: string): Promise<StoreDeletion> {
+		const body = await api<{ deleted: StoreDeletion }>(
+			`/api/stores/${encodeURIComponent(storeId)}`,
+			{ method: 'DELETE' }
+		);
+		this.lastDeleted = body.deleted;
+		await this.load();
+		return body.deleted;
+	}
+}
+
+/** §9.1: what `DELETE /api/stores/{id}` reports it destroyed. */
+export interface StoreDeletion {
+	storeId: string;
+	name: string;
+	trips: number;
+	items: number;
 }
 
 /** The five fields §8.6 makes patchable. `visibility` is the M6 addition. */

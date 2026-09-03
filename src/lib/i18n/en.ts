@@ -54,6 +54,8 @@ export const en = {
 	homeArchivedEmpty: 'Nothing is archived.',
 	homeArchivedBody: 'An archived shop keeps its lists. Bring it back whenever you like.',
 	homeRestore: 'Bring back',
+	/** The row is narrow; the arming tap gets a full sentence as its aria-label. */
+	homeDeleteShort: 'Delete',
 
 	// ---- store card -----------------------------------------------------
 	cardNothingNeeded: 'Nothing needed',
@@ -154,6 +156,25 @@ export const en = {
 	storeArchiveHelp:
 		'It leaves the home screen and nothing is deleted. Bring it back from Archived shops.',
 	storeArchived: 'Archived. It is under “Archived shops”.',
+
+	// ---- deleting a shop (§9.1, R-23) ------------------------------------
+	// The words do the safety work. “Archive” and “Delete” sit in the same sheet,
+	// so the copy on each has to make the difference obvious BEFORE the tap:
+	// archiving says nothing is deleted; deleting names what goes and says it
+	// does not come back.
+	storeDelete: 'Delete this shop',
+	storeDeleteHelp:
+		'The shop, its trips and every item on them go, for everyone. This cannot be undone.',
+	storeDeleteConfirm: (name: string) => `Delete ${name} for good?`,
+	storeDeleteCounts: (trips: number, items: number) =>
+		`${plural(L, trips, { one: `${trips} trip`, other: `${trips} trips` })} and ${plural(L, items, {
+			one: `${items} item`,
+			other: `${items} items`
+		})} went with it.`,
+	storeDeleteSubmit: 'Delete permanently',
+	storeDeleteKeep: 'Keep it',
+	storeDeleting: 'Deleting…',
+	storeDeleted: (name: string) => `${name} was deleted.`,
 
 	// ---- trips ----------------------------------------------------------
 	tripsEyebrow: 'What we bought',

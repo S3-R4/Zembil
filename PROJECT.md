@@ -56,14 +56,15 @@ today, and there should not be one until someone asks for the feature.
 
 **Complete and deployed**, plus **M6**, which added five owner-requested features: batched push
 notifications, trip claims, Turkish and German, private shops, and click-to-copy for the one-time
-password. Every milestone through M5 was audited and every blocking finding closed.
+password, and **M7**, which added permanent store deletion and replaced the shop-settings icon.
+Every milestone through M5 was audited and every blocking finding closed.
 
 | Signal | Value |
 |---|---|
-| Unit/integration tests | **657** (Vitest), green |
-| End-to-end specs | **18** (Playwright, Chromium at 390×844), green |
+| Unit/integration tests | **670** (Vitest), green |
+| End-to-end specs | **21** (Playwright, Chromium at 390×844), green |
 | Type check | `npm run check` clean across **527** files |
-| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6 |
+| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6 and M7 |
 | Reviewer audits | M1 ×3, M2, M3, M4, **M6** — all closed, findings acted on |
 
 It is running in production on the owner's home server at `zembil.s3r4.tech`, fronted by a
@@ -81,6 +82,7 @@ It is running in production on the owner's home server at `zembil.s3r4.tech`, fr
 | **M4** Deploy | Dockerfile, compose, entrypoint, healthcheck, backup/restore, README | ✅ |
 | **M5** Hardening | Act on all findings, re-verify the done-means checklist against a rebuilt image | ✅ |
 | **M6** Five features | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password | ✅ — schema delta is migration 002; contract addendum is §8 |
+| **M7** Delete a shop | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been | ✅ — **no migration**; contract addendum is §9 |
 
 ---
 
@@ -186,8 +188,9 @@ If you add an invariant, say which side it lands on, and if it is test-bound, wr
 
 ## 5. The rollover state machine
 
-Rules **R-1 … R-17** in `docs/CONTRACT.md` §2, and **R-18 … R-22 in §8.3** (claims, batched
-notifications, and the visibility rule). Each one maps to at least one test assertion. This is
+Rules **R-1 … R-17** in `docs/CONTRACT.md` §2, **R-18 … R-22 in §8.3** (claims, batched
+notifications, and the visibility rule), and **R-23 in §9.2** (deleting a store ends everything on it
+at once — no carry-over, no successor trip, no tombstone). Each one maps to at least one test assertion. This is
 the heart of the app; the ones with sharp edges:
 
 - **R-2 — Add targets the store, not the trip.** The server resolves the open trip *inside* the write
@@ -228,7 +231,7 @@ Complete definitions in `docs/CONTRACT.md` §3. Summary:
   `passkey/{login,register}/{options,verify}`; `DELETE /api/auth/passkey/{id}`; `GET /api/me`
 - **Admin** — `GET|POST /api/admin/users`, `PATCH /api/admin/users/{id}`,
   `POST …/reset-password`, `DELETE …/passkeys`
-- **Stores** — `GET|POST /api/stores`, `PATCH /api/stores/{id}`
+- **Stores** — `GET|POST /api/stores`, `PATCH|DELETE /api/stores/{id}`
 - **Lists** — `GET /api/stores/{id}/list`, `POST /api/stores/{id}/items`,
   `PATCH|DELETE /api/items/{id}`, `POST /api/items/{id}/{tick,untick}`,
   `POST /api/stores/{id}/trips/close`
@@ -388,8 +391,9 @@ The rules that are not negotiable because they come from the brief, not from tas
 Screens: `/login`, `/` (Shops), `/s/{storeId}` (List), `/trips` (History), `/you` (Account),
 `/you/admin` (Admin), plus sheets for quick-add, item detail and finish-trip — and, from M6, the
 claim sheet and claim strip on the list, the shop-settings sheet behind the gear in the list header
-(rename, recolour, visibility, archive), the archived-shops sheet on the home screen, and the
-Notifications and Language sections on the account screen. `docs/DESIGN.md` §4 lists them with the
+(rename, recolour, visibility, archive, and — from M7 — delete), the archived-shops sheet on the home
+screen (where each row can also be deleted), and the Notifications and Language sections on the
+account screen. `docs/DESIGN.md` §4 lists them with the
 copy each one uses.
 
 ### Service worker
@@ -561,8 +565,8 @@ seams that are left to convention drift.)
 
 | File | What it is | Authority |
 |---|---|---|
-| `docs/CONTRACT.md` | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — **plus §8, the M6 addendum** (migration 002, I-14…I-18, R-18…R-22, the visibility rule, claims, locale, push, the §3.0 delta). | Normative. Build against this. |
-| `docs/DECISIONS.md` | D-001 … **D-043**, each with the reasoning and what was rejected. | Why things are the way they are. |
+| `docs/CONTRACT.md` | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — **plus §8, the M6 addendum** (migration 002, I-14…I-18, R-18…R-22, the visibility rule, claims, locale, push, the §3.0 delta) **and §9, the M7 addendum** (`DELETE /api/stores/{id}`, R-23, the §3.0 delta, and the confirmation rule that lives in the UI). | Normative. Build against this. |
+| `docs/DECISIONS.md` | D-001 … **D-045**, each with the reasoning and what was rejected. | Why things are the way they are. |
 | `PLAN.md` | Stack, data model at a glance, file ownership, milestones with exit criteria, test strategy, known gaps. | Process record. |
 | `docs/DESIGN.md` | Colour tokens, type scale, metrics, screen list, layout rules — **and §6, the language rules** (why Turkish supplies one plural form, why no suffix is ever glued to a shop name, why German uses "Sie", and why a server error message is never translated by the client). | Distilled from the canvas. |
 | `design/Zembil.dc.html` | 22 artboards at 390×844. | **Visual source of truth** — beats `DESIGN.md`. |
@@ -635,6 +639,12 @@ Read this section before you trust a claim made elsewhere in the docs.
   pruning are all real — what is untested is `web-push` actually reaching Apple, Google or Mozilla,
   and iOS Safari actually showing one. Given §13's existing note that passkeys have never run over
   real TLS, this is the same shape of gap.
+- **A deleted shop cannot be recovered at all.** That is the feature, not a gap (D-045), but it is the
+  one irreversible write in the API and it is worth knowing before the first support question: the
+  recovery path is the operator's backup, and nothing runs `backup.sh` on a timer (see above). The
+  confirmation that prevents the accident lives entirely in the interface — §9.4 states it and the
+  e2e suite asserts it, so a redesign of that sheet can break the protection without breaking a
+  status code.
 - **A private shop cannot be recovered through the API.** Deliberate (D-040), documented in the README,
   and asserted by a test so nobody "fixes" it into an admin exemption by accident. Recovery is one
   `UPDATE`.
@@ -667,7 +677,7 @@ Read this section before you trust a claim made elsewhere in the docs.
 
 ### Before you call it done
 
-- `npm test` (Vitest, 398) and `npm run test:e2e` (Playwright, 12) green.
+- `npm test` (Vitest, 670) and `npm run test:e2e` (Playwright, 21) green.
 - `npm run check` clean.
 - **Run a mutation sweep over the guards you added.** Break each one; anything that stays green is a
   finding.
@@ -704,7 +714,9 @@ with store visibility rather than waiting its turn.)*
 - Do not edit `docs/CONTRACT.md` to match an implementation. Report the mismatch.
 - Do not cache an authenticated document in the service worker.
 - Do not add an admin override for private stores. It is not an oversight (D-040), and a test asserts
-  its absence.
+  its absence — for `DELETE` as well as for everything else.
+- Do not add a confirmation token, a `?really=true` or a typed-shop-name field to
+  `DELETE /api/stores/{id}`. The confirmation is a UI rule on purpose (D-045, §9.4).
 - Do not make an authorization decision about a store anywhere except `requireVisibleStore` /
   `isVisibleTo`. Nothing else may read `stores.private_to` to decide something.
 - Do not read the locale from a request header after account creation, and do not put the current

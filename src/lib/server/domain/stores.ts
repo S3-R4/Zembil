@@ -9,7 +9,7 @@ import type { Db } from '../db/index.js';
 import { tx } from '../db/index.js';
 import { conflict, notFound, validationFailed, type DomainError } from './errors.js';
 import { emitStoreChanged, emitStoresChanged } from '../realtime/bus.js';
-import { noteStoreActivity } from '../notify/index.js';
+import { discardStoreNotifications, noteStoreActivity } from '../notify/index.js';
 import {
 	STORE_SUMMARY_SELECT,
 	readStoreSummary,
@@ -339,6 +339,73 @@ export function updateStore(
 	emitStoreChanged(storeId, rev);
 	noteStoreActivity(storeId);
 	return getStoreSummary(db, storeId, actor.id);
+}
+
+/** What a delete removed, so the caller can say so and a test can assert it. */
+export interface StoreDeletion {
+	storeId: string;
+	name: string;
+	trips: number;
+	items: number;
+}
+
+/**
+ * §9.1 / R-23 `DELETE /api/stores/{storeId}` — the permanent one.
+ *
+ * Archiving (R-14) hides a shop and keeps every row; this destroys them. The two
+ * are deliberately different actions with different words on them, because only
+ * one of them is undoable and the difference has to be visible before the tap,
+ * not after it.
+ *
+ * The cascade is the SCHEMA's, not this function's: `trips.store_id` and
+ * `items.store_id` are both `REFERENCES stores(id) ON DELETE CASCADE`, and the
+ * connection runs with `PRAGMA foreign_keys = ON` (db/index.ts). Deleting the
+ * children here in application code would be a second, weaker copy of a rule the
+ * database already enforces atomically — and the copy is what rots. The counts
+ * are read *before* the delete, inside the same transaction, purely so the
+ * response can report what went.
+ *
+ * §8.4: visibility is resolved FIRST and an invisible store gets the
+ * byte-identical `404 STORE_NOT_FOUND`. R-14 does not apply — an archived store
+ * is deletable, and is in fact the likeliest thing to be deleted.
+ *
+ * §3.0: emits `stores.changed` AND `store.changed`. The second one carries
+ * `rev + 1` — a rev the row will never hold, because the row is gone. That is
+ * the point: a member standing on `/s/{id}` when somebody else deletes the shop
+ * holds a cursor at `rev`, and only a strictly higher hint makes them refetch
+ * and discover the 404. Emitting nothing would leave them tapping a list that no
+ * longer exists.
+ */
+export function deleteStore(db: Db, storeId: string, actor: Actor): StoreDeletion {
+	const result = tx(db, () => {
+		const store = requireVisibleStore(db, storeId, actor.id);
+
+		const row = db.prepare('SELECT name FROM stores WHERE id = ?').get(storeId) as {
+			name: string;
+		};
+		const trips = Number(
+			(db.prepare('SELECT COUNT(*) AS n FROM trips WHERE store_id = ?').get(storeId) as { n: number })
+				.n
+		);
+		const items = Number(
+			(db.prepare('SELECT COUNT(*) AS n FROM items WHERE store_id = ?').get(storeId) as { n: number })
+				.n
+		);
+
+		db.prepare('DELETE FROM stores WHERE id = ?').run(storeId);
+
+		return {
+			deletion: { storeId, name: row.name, trips, items } satisfies StoreDeletion,
+			rev: store.rev + 1
+		};
+	});
+
+	// A batch armed for a list that no longer exists notifies nobody about
+	// nothing; drop it rather than let its timer run out (§9.1).
+	discardStoreNotifications(storeId);
+	emitStoresChanged();
+	emitStoreChanged(storeId, result.rev);
+	return result.deletion;
 }
 
 /** R-16: bumped INSIDE the write transaction; the event is emitted after commit.

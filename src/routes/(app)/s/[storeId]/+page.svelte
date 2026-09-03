@@ -236,6 +236,9 @@
 		settingsName = store?.name ?? '';
 		settingsColor = (store?.color ?? 'terracotta') as StoreColor;
 		settingsError = null;
+		// Never reopen already-armed. A confirm step that survives a close is a
+		// delete one tap away from a member who came back to rename something.
+		confirmingDelete = false;
 		settingsOpen = true;
 	}
 
@@ -287,6 +290,26 @@
 		}
 	}
 
+	/**
+	 * §9.1 / R-23. Two taps, and the second one is a different button with
+	 * different words on it — the destructive action is never the one already
+	 * under the thumb. There is no `confirm()`: it is unstyled, untranslated, and
+	 * on iOS it is a system sheet over a bottom sheet.
+	 */
+	let confirmingDelete = $state(false);
+
+	async function deleteStore() {
+		if (!store) return;
+		const ok = await runSettings(() => shops.remove(store.id));
+		if (ok) {
+			confirmingDelete = false;
+			settingsOpen = false;
+			// Home reads `shops.lastDeleted` and says what went. Nothing here can
+			// say it: this screen is about to 404.
+			await goto('/');
+		}
+	}
+
 	let boughtCount = $derived(ticked.length);
 	let leftCount = $derived(pending.length);
 
@@ -326,14 +349,25 @@
 		</h1>
 	</div>
 	<button class="gear" type="button" onclick={openSettings} aria-label={m.storeSettings}>
-		<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-			<circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2" />
+		<!--
+			A cog, not a sun. The first pass drew a circle with eight straight rays,
+			which reads as brightness — the icon next to it on most phones is the
+			display setting. The toothed ring is what says "settings" at 22px.
+		-->
+		<svg
+			viewBox="0 0 24 24"
+			width="22"
+			height="22"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.8"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<circle cx="12" cy="12" r="3.1" />
 			<path
-				d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
+				d="M19.05 14.6a1.5 1.5 0 0 0 .3 1.66l.05.05a1.82 1.82 0 1 1-2.58 2.58l-.05-.05a1.5 1.5 0 0 0-1.66-.3 1.5 1.5 0 0 0-.91 1.38v.15a1.82 1.82 0 1 1-3.64 0v-.08a1.5 1.5 0 0 0-.98-1.37 1.5 1.5 0 0 0-1.66.3l-.05.05a1.82 1.82 0 1 1-2.58-2.58l.05-.05a1.5 1.5 0 0 0 .3-1.66 1.5 1.5 0 0 0-1.37-.91h-.15a1.82 1.82 0 1 1 0-3.64h.08a1.5 1.5 0 0 0 1.37-.98 1.5 1.5 0 0 0-.3-1.66l-.05-.05a1.82 1.82 0 1 1 2.58-2.58l.05.05a1.5 1.5 0 0 0 1.66.3h.07a1.5 1.5 0 0 0 .91-1.37v-.15a1.82 1.82 0 1 1 3.64 0v.08a1.5 1.5 0 0 0 .91 1.37 1.5 1.5 0 0 0 1.66-.3l.05-.05a1.82 1.82 0 1 1 2.58 2.58l-.05.05a1.5 1.5 0 0 0-.3 1.66v.07a1.5 1.5 0 0 0 1.37.91h.15a1.82 1.82 0 1 1 0 3.64h-.08a1.5 1.5 0 0 0-1.37.91z"
 			/>
 		</svg>
 	</button>
@@ -590,6 +624,46 @@
 		</button>
 		<p class="z-meta faint">{m.storeArchiveHelp}</p>
 	</section>
+
+	<!--
+	  §9.1 / R-23 — the permanent one. It sits below Archive on purpose: the
+	  reversible action is the one you meet first, and the copy on each says
+	  which is which before the tap rather than after it.
+	-->
+	<section class="visibility danger">
+		{#if confirmingDelete}
+			<p class="z-card-title">{m.storeDeleteConfirm(store?.name ?? '')}</p>
+			<p class="z-meta faint">{m.storeDeleteHelp}</p>
+			<div class="confirm-row">
+				<button
+					class="z-btn z-btn--tertiary z-btn--auto"
+					type="button"
+					disabled={settingsBusy}
+					onclick={() => (confirmingDelete = false)}
+				>
+					{m.storeDeleteKeep}
+				</button>
+				<button
+					class="z-btn z-btn--danger go"
+					type="button"
+					disabled={settingsBusy}
+					onclick={deleteStore}
+				>
+					{settingsBusy ? m.storeDeleting : m.storeDeleteSubmit}
+				</button>
+			</div>
+		{:else}
+			<button
+				class="z-btn z-btn--tertiary z-btn--danger"
+				type="button"
+				disabled={settingsBusy}
+				onclick={() => (confirmingDelete = true)}
+			>
+				{m.storeDelete}
+			</button>
+			<p class="z-meta faint">{m.storeDeleteHelp}</p>
+		{/if}
+	</section>
 </Sheet>
 
 <!-- Finish trip -->
@@ -728,6 +802,20 @@
 		margin-top: 18px;
 		padding-top: 18px;
 		border-top: 1px solid var(--rule);
+	}
+
+	/* The armed confirm step. Two 44px targets side by side, "Keep it" first so
+	   the destructive one is not where the thumb already was. */
+	.confirm-row {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 10px;
+		align-items: center;
+	}
+
+	.confirm-row .go {
+		border-color: var(--danger);
+		font-weight: 700;
 	}
 
 	.segmented {

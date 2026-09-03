@@ -59,6 +59,7 @@ export const tr: Messages = {
 	homeArchivedEmpty: 'Arşivde bir şey yok.',
 	homeArchivedBody: 'Arşivlenen dükkan listelerini korur. İstediğiniz zaman geri getirebilirsiniz.',
 	homeRestore: 'Geri getir',
+	homeDeleteShort: 'Sil',
 
 	// ---- store card -----------------------------------------------------
 	cardNothingNeeded: 'Bir şey gerekmiyor',
@@ -151,6 +152,22 @@ export const tr: Messages = {
 	storeArchiveHelp:
 		'Ana ekrandan kalkar, hiçbir şey silinmez. “Arşivlenen dükkanlar”dan geri getirebilirsiniz.',
 	storeArchived: 'Arşivlendi. “Arşivlenen dükkanlar” içinde.',
+
+	// ---- dükkanı silme (§9.1, R-23) ---------------------------------------
+	// Sayılan adlar çoğul eki almaz: “3 alışveriş”, “3 alışverişler” değil.
+	// Dükkan adına da hiçbir ek eklenmez; ekler sabit kelimelerin üzerinde kalır.
+	storeDelete: 'Bu dükkanı sil',
+	storeDeleteHelp:
+		'Dükkan, alışverişleri ve içindeki tüm ürünler herkes için silinir. Bu işlem geri alınamaz.',
+	storeDeleteConfirm: (name: string) => `${name} kalıcı olarak silinsin mi?`,
+	storeDeleteCounts: (trips: number, items: number) =>
+		`${plural(L, trips, { other: `${trips} alışveriş` })} ve ${plural(L, items, {
+			other: `${items} ürün`
+		})} da silindi.`,
+	storeDeleteSubmit: 'Kalıcı olarak sil',
+	storeDeleteKeep: 'Kalsın',
+	storeDeleting: 'Siliniyor…',
+	storeDeleted: (name: string) => `${name} silindi.`,
 
 	// ---- trips ----------------------------------------------------------
 	tripsEyebrow: 'Neler aldık',

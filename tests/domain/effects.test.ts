@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { harness, makeUser, recorder, type Harness } from './_support';
-import { createStore, updateStore } from '$lib/server/domain/stores';
+import { createStore, deleteStore, updateStore } from '$lib/server/domain/stores';
 import { addItem, deleteItem, tickItem, untickItem, updateItem } from '$lib/server/domain/items';
 import { closeTrip } from '$lib/server/domain/trips';
 import { resetBus, subscribe } from '$lib/server/realtime/bus';
@@ -40,6 +40,29 @@ describe('§3.0 — writes that bump and emit', () => {
 			expect(types(rec.take())).toEqual(['stores.changed']);
 			expect(store.rev).toBe(0);
 			expect(revOf(h, store.id)).toBe(0);
+		} finally {
+			rec.stop();
+			h.close();
+		}
+	});
+
+	test('DELETE /api/stores/{id} — emits stores.changed AND store.changed one rev ahead (§9.1)', () => {
+		const { h, actor, rec } = ctx();
+		try {
+			const store = createStore(h.db, { name: 'Migros' }, actor);
+			updateStore(h.db, store.id, { name: 'Migros Sanayi' }, actor);
+			const before = revOf(h, store.id);
+			rec.take();
+
+			const deleted = deleteStore(h.db, store.id, actor);
+			expect(deleted.storeId).toBe(store.id);
+
+			const events = rec.take();
+			expect(types(events)).toEqual(['stores.changed', 'store.changed']);
+			// The row is gone, so there is no rev to read back — the hint carries a
+			// number strictly above the cursor an open list screen is holding,
+			// which is the only thing that makes it refetch and learn the 404.
+			expect((events[1] as any).rev).toBe(before + 1);
 		} finally {
 			rec.stop();
 			h.close();

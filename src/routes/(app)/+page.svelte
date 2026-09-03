@@ -152,6 +152,43 @@
 		}
 	}
 
+	// ---- deleting a shop (§9.1, R-23) ---------------------------------------
+	// An archived shop is the likeliest thing anyone deletes, and this sheet is
+	// the only screen that can reach one, so the permanent action lives here too
+	// — behind the same two-tap arm as the one in shop settings.
+	let confirmingDelete = $state<string | null>(null);
+
+	async function destroy(store: StoreSummary) {
+		if (archivedBusy) return;
+		archivedBusy = true;
+		archivedError = null;
+		try {
+			await shops.remove(store.id);
+			confirmingDelete = null;
+			archived = await shops.loadArchived();
+		} catch (err) {
+			archivedError = messageOf(err);
+		} finally {
+			archivedBusy = false;
+		}
+	}
+
+	/**
+	 * The receipt for a deletion, wherever it happened — this sheet, or shop
+	 * settings on a screen that then had to navigate here because it was about to
+	 * 404. Read once and cleared, so it does not reappear on the next visit.
+	 */
+	let receipt = $state<string | null>(null);
+
+	$effect(() => {
+		const deleted = shops.lastDeleted;
+		if (!deleted) return;
+		untrack(() => {
+			receipt = `${m.storeDeleted(deleted.name)} ${m.storeDeleteCounts(deleted.trips, deleted.items)}`;
+			shops.lastDeleted = null;
+		});
+	});
+
 	let initial = $derived((data.user?.displayName ?? '?').trim().charAt(0).toUpperCase());
 </script>
 
@@ -167,6 +204,9 @@
 
 <div class="body">
 	<Banner message={shops.error} onretry={() => shops.load()} />
+	<!-- §9.1: what the last delete removed. Not an error, but the same inline
+	     slot — it is the one place on this screen that reports a fact. -->
+	<Banner message={receipt} />
 
 	{#if stores.length === 0}
 		<div class="empty">
@@ -299,16 +339,46 @@
 				<li>
 					<span class="grow" data-color={store.color}>
 						<span class="archived-name">{store.name}</span>
-						<span class="z-meta">{m.cardArchived}</span>
+						<span class="z-meta">
+							{confirmingDelete === store.id ? m.storeDeleteHelp : m.cardArchived}
+						</span>
 					</span>
-					<button
-						class="z-btn z-btn--tertiary z-btn--auto"
-						type="button"
-						disabled={archivedBusy}
-						onclick={() => restore(store)}
-					>
-						{m.homeRestore}
-					</button>
+					{#if confirmingDelete === store.id}
+						<button
+							class="z-btn z-btn--tertiary z-btn--auto"
+							type="button"
+							disabled={archivedBusy}
+							onclick={() => (confirmingDelete = null)}
+						>
+							{m.storeDeleteKeep}
+						</button>
+						<button
+							class="z-btn z-btn--tertiary z-btn--danger z-btn--auto go"
+							type="button"
+							disabled={archivedBusy}
+							onclick={() => destroy(store)}
+						>
+							{archivedBusy ? m.storeDeleting : m.storeDeleteSubmit}
+						</button>
+					{:else}
+						<button
+							class="z-btn z-btn--tertiary z-btn--auto"
+							type="button"
+							disabled={archivedBusy}
+							onclick={() => restore(store)}
+						>
+							{m.homeRestore}
+						</button>
+						<button
+							class="z-btn z-btn--tertiary z-btn--danger z-btn--auto"
+							type="button"
+							disabled={archivedBusy}
+							aria-label={m.storeDeleteConfirm(store.name)}
+							onclick={() => (confirmingDelete = store.id)}
+						>
+							{m.homeDeleteShort}
+						</button>
+					{/if}
 				</li>
 			{/each}
 		</ul>
@@ -331,9 +401,16 @@
 	ul.archived li {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 8px 0;
 		min-height: 56px;
 		border-top: 1px solid var(--rule);
+	}
+
+	ul.archived .go {
+		border-color: var(--danger);
+		font-weight: 700;
 	}
 
 	ul.archived .grow {

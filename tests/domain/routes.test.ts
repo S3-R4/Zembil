@@ -58,6 +58,7 @@ describe('authentication seam', () => {
 				call(storesRoute.GET, { locals: anon, url: url() }),
 				call(storesRoute.POST, { locals: anon, request: jsonRequest({ name: 'X' }) }),
 				call(storeRoute.PATCH, { locals: anon, params: { storeId: 'x' }, request: jsonRequest({}) }),
+				call(storeRoute.DELETE, { locals: anon, params: { storeId: 'x' } }),
 				call(listRoute.GET, { locals: anon, params: { storeId: 'x' } }),
 				call(itemsRoute.POST, {
 					locals: anon,

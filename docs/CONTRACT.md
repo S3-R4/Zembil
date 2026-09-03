@@ -1655,3 +1655,105 @@ a bad one crashes the process per §6's standard; the DERIVED default is the ori
 fabricate a contact URI, and nothing is lost that was ever going to work: a browser cannot receive
 real web push against a non-HTTPS deployment. `AuthConfig.vapidSubject` is therefore
 `string | null`, and `DeliveryReport.skipped` gains `'no-vapid-subject'`.
+
+---
+
+## 9. Addendum 3 — deleting a store (M7, no migration)
+
+Status: **frozen at the start of this milestone (M7).** §1–§8 are unchanged and still normative; this
+section is additive and normative for everything it names. There is **no schema delta** — the whole
+feature is one endpoint over a cascade migration 001 already declared.
+
+Same rule as the header: if something here is wrong, ambiguous or missing, **stop and report it**.
+
+### 9.1 `DELETE /api/stores/{storeId}`
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| DELETE | `/api/stores/{storeId}` | session | Delete a store and everything on it, permanently |
+
+Request: no body (any body is ignored). `200 → { "deleted": StoreDeletion }`:
+
+```ts
+interface StoreDeletion {
+  storeId: string;
+  name: string;   // the name it had when it went, so a screen can say what it deleted
+  trips: number;  // rows removed from trips
+  items: number;  // rows removed from items, carried clones included
+}
+```
+
+Normative behaviour:
+
+1. **Visibility is resolved first (§8.4).** A store that does not exist and a store private to
+   somebody else produce the identical `404 STORE_NOT_FOUND` — same status, same code, same message,
+   no sibling fields. **Being an admin does not grant visibility here either** (D-040 is unchanged).
+2. **R-14 does not apply.** An archived store is deletable; archiving is not a precondition and not a
+   protection. `409 STORE_ARCHIVED` is never returned by this endpoint.
+3. **The cascade is the schema's.** `trips.store_id` and `items.store_id` are
+   `REFERENCES stores(id) ON DELETE CASCADE` (§1.1) and the connection runs with
+   `PRAGMA foreign_keys = ON`, so one `DELETE FROM stores WHERE id = ?` removes every trip and every
+   item, including `carried` rows and closed trips. The endpoint must **not** delete children in
+   application code: a second copy of a rule the database already enforces atomically is the copy
+   that rots.
+4. **The counts are read inside the same transaction, before the delete**, and are reported only so
+   the client can say what went. They are not a precondition and nothing branches on them.
+5. **It is not idempotent, and does not pretend to be.** A second delete of the same id is
+   `404 STORE_NOT_FOUND`, which is also what a fabricated id gets — consistent with rule 1, and the
+   reason no "already deleted" code exists.
+6. **Any member the store is visible to may delete it.** There is no owner of a public store, no
+   admin-only gate, and no confirmation token in the request: the confirmation is a UI affordance
+   (§9.4), not a protocol field. See D-045.
+
+No new error code. The endpoint returns `401 UNAUTHENTICATED`, `403` from the origin check per §3.2's
+CSRF rule (it is a mutating method), `404 STORE_NOT_FOUND`, or `200`.
+
+### 9.2 R-23 — the rollover rule for deletion
+
+**R-23.** Deleting a store ends everything on it at once: its open trip, its closed trips, its items
+and its claim (R-18). There is no carry-over, no successor trip, and no soft-delete tombstone at store
+level — `items.deleted_at` is a soft delete because an item is undone by a person changing their mind,
+and a store is not.
+
+R-6's statement order (D-024) is untouched: a delete is a single statement against `stores`, so no
+ordering question arises. R-11's `BEGIN IMMEDIATE` serialisation covers the delete-versus-close race —
+whichever commits first wins, and the loser sees `404 STORE_NOT_FOUND` or `409 TRIP_ALREADY_CLOSED`
+respectively, both of which are already contract.
+
+### 9.3 §3.0 delta — write effects
+
+| Endpoint | Bumps | Emits | Notes |
+|---|---|---|---|
+| `DELETE /api/stores/{id}` (deleted) | — (the row is gone) | `stores.changed` **and** `store.changed` | `store.changed` carries `rev + 1`: a rev the row will never hold. |
+| `DELETE /api/stores/{id}` (refused) | — | — | A 404 emits nothing. |
+
+The `rev + 1` is normative, not incidental. A member standing on `/s/{id}` holds `rev` as their
+revalidation cursor and §4's rule is that a hint at or below the cursor is not worth a fetch. Only a
+strictly higher hint makes them refetch, receive the 404, and learn the shop is gone; emitting nothing
+would leave them tapping a list that no longer exists.
+
+**Notifications (§8.9 delta).** Deleting a store discards any pending batch armed for it — a batch
+describing a list that no longer exists notifies nobody about nothing. `deliver()` already tolerates a
+store that vanished mid-window (`skipped: 'store-gone'`); the discard is the tidier fact, not the
+safety net.
+
+### 9.4 The confirmation is a UI rule, not a protocol one
+
+The API takes no confirmation token, and must not grow one. The protection is in the interface and it
+is stated here because it is testable:
+
+- Deleting is **two taps on two different buttons with different words**. The first arms; the second,
+  which was not under the thumb, destroys.
+- The armed state **does not survive closing the sheet**. Reopening shop settings must not put
+  "Delete permanently" one tap away from a member who came back to rename something.
+- The copy on Archive and on Delete each says which is which **before** the tap: archiving says
+  nothing is deleted, deleting says what goes and that it does not come back.
+- Both controls clear the 44px floor (DESIGN.md §3), including the armed pair side by side.
+
+### 9.5 What deletion does not change
+
+- **No new invariant.** The cascade is I-1's referential shape doing what it was declared to do.
+- **No admin exemption anywhere.** D-040 stands: an admin cannot see, patch or delete a store private
+  to another member, and the tests that assert its absence now cover DELETE too.
+- **No recovery path.** There is no undo and no trash. Recovery is the operator's backup
+  (`scripts/backup.sh`, §3.8 and the README), which is exactly what it is for.

@@ -263,6 +263,36 @@ recording sink installed. This is D-036's argument, demonstrated once more.
 
 ---
 
+### M7 — Delete a shop
+
+Two owner requests after M6, both small, neither groundwork for anything else.
+
+| # | Feature | Where it lands |
+|---|---|---|
+| 1 | **A settings icon that reads as settings** | `src/routes/(app)/s/[storeId]/+page.svelte` — the first pass drew a circle with eight straight rays, which is the display-brightness icon on most phones. It is a cog now. |
+| 2 | **Delete a shop, permanently** | `deleteStore` in `src/lib/server/domain/stores.ts`, `DELETE /api/stores/{storeId}`, `discardStoreNotifications` in `src/lib/server/notify/`, a two-step confirm in the shop-settings sheet and in the archived-shops sheet, a receipt on the home screen, eight new message keys in all three catalogues. R-23, D-045. |
+
+**No schema delta.** The rows go away through the `ON DELETE CASCADE` the schema has carried since
+migration 001; nothing in the application walks the children. Contract addendum: `docs/CONTRACT.md`
+**§9**, frozen before implementation, in the same role §8 played at M6.
+
+The one non-obvious protocol detail is the revision the deletion emits. `store.changed` carries
+`rev + 1` for a store that no longer has a row, because §4's client rule drops a hint whose `rev` is
+not ahead of the cursor it already holds — emitting the dead store's last `rev` would leave an open
+`/s/{id}` sitting on a shop that is gone. This is normative in §9.3, not an implementation detail.
+
+**Exit criteria, and what actually happened against each:**
+
+| Clause | Evidence |
+|---|---|
+| `npm test` green | ✅ **670** tests, 40 files (657 at M6) |
+| `npm run test:e2e` green | ✅ **21** specs (18 at M6) |
+| `npm run check` clean | ✅ 0 errors across 527 files |
+| Mutation sweep over every guard added | ✅ 4 mutations, all killed on the first pass: dropping the visibility check in `deleteStore` (5 failures), dropping `discardStoreNotifications` (1), emitting `rev` instead of `rev + 1` (1), dropping `emitStoresChanged()` (1) |
+| The refusal is observable | ✅ Every 404/401 test in `tests/domain/delete-store.test.ts` reads the store, trip and item rows back after the refusal — M6's surviving mutation, applied as a rule rather than remembered as an anecdote |
+| Schema delta | None. No migration; `user_version` stays at 3 |
+---
+
 ## 6. Test strategy
 
 - **Unit and integration (Vitest).** Each test runs migrations into a fresh temporary database *file*

@@ -19,6 +19,20 @@ against a contract frozen first (D-031), which is why four "releases" share a da
 
 ---
 
+## v0.9 — 2026-09-03
+
+**Who added it, and a claim strip that knows when nobody's listening.** (M9)
+
+- The item detail sheet now shows "Added by … · …" under the fields — `items.created_by` /
+  `createdByName` has been on the wire since migration 001, and carry-over already preserved it; the
+  frontend just never rendered it. No migration, no contract change. Contract §1.1, §1.2. D-049.
+- The "I'm going to this shop" claim strip no longer renders on a private shop — its own owner is the
+  only member who could ever see it, so the strip could only ever announce a trip to yourself. Applies
+  to the list screen's claim strip and the home screen's `StoreCard` claim line alike. Contract §8.4,
+  §8.6. D-049.
+
+---
+
 ## v0.8 — 2026-09-03
 
 **Who may change who sees a shop, and a theme that follows the person.** (M8)

@@ -104,6 +104,7 @@ export const en = {
 
 	itemSheetTitle: 'Item',
 	itemInStore: (store: string) => `In ${store}`,
+	itemAddedBy: (name: string, when: string) => `Added by ${name} · ${when}`,
 	rowUndo: 'Undo',
 	rowEdit: (name: string) => `Edit ${name}`,
 	rowCarried: (n: number) =>

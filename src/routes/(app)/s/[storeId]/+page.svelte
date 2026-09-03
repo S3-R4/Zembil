@@ -13,6 +13,7 @@
 	import { ApiError, newClientId } from '$lib/client/api';
 	import { messages } from '$lib/client/i18n';
 	import { STORE_COLORS } from '$lib/client/palette';
+	import { relative } from '$lib/client/time';
 	import Banner from '$lib/components/Banner.svelte';
 	import ItemRow from '$lib/components/ItemRow.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
@@ -379,7 +380,12 @@
   It sits directly under the header rather than in the dock because it is
   status first and a control second: the common case is reading it, not
   pressing it. The action still clears 44px.
+
+  A private store is visible to its owner alone (§8.4), so "I'm going to
+  this shop" would only ever be announcing a trip to yourself. The strip is
+  simply not useful there, so it does not render.
 -->
+{#if store?.visibility !== 'private'}
 <div class="claim" class:mine={store?.claimedByMe}>
 	<div class="claim-text">
 		<p class="claim-who">{claimLine}</p>
@@ -397,6 +403,7 @@
 		</button>
 	{/if}
 </div>
+{/if}
 
 <div class="body">
 	<Banner message={list.error} onretry={() => list.load()} />
@@ -488,6 +495,12 @@
 <!-- Item detail -->
 <Sheet open={editing !== null} title={m.itemSheetTitle} onclose={() => (editing = null)}>
 	<Banner message={editError} />
+	<!-- design/Zembil.dc.html "Item detail / edit" artboard: who added it, right
+	     under the title. `createdByName` is null only if that account was since
+	     deleted (ON DELETE SET NULL), so the line is omitted rather than blank. -->
+	{#if editing?.createdByName}
+		<p class="z-meta">{m.itemAddedBy(editing.createdByName, relative(editing.createdAt))}</p>
+	{/if}
 	<form onsubmit={saveItem}>
 		<label class="sr-only" for="edit-name">{m.addItemPlaceholder}</label>
 		<input class="z-field" id="edit-name" maxlength="200" bind:value={editName} />

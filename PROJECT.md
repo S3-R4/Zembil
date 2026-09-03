@@ -81,18 +81,19 @@ today, and there should not be one until someone asks for the feature.
 
 **Complete and deployed**, plus **M6**, which added five owner-requested features: batched push
 notifications, trip claims, Turkish and German, private shops, and click-to-copy for the one-time
-password, **M7**, which added permanent store deletion and replaced the shop-settings icon, and
-**M8**, which put the visibility control behind a principal and moved the theme onto the account.
+password, **M7**, which added permanent store deletion and replaced the shop-settings icon, **M8**,
+which put the visibility control behind a principal and moved the theme onto the account, and **M9**,
+which surfaced item authorship and stopped the claim strip from rendering on a private shop.
 Every milestone through M5 was audited and every blocking finding closed.
 
 | Signal | Value |
 |---|---|
-| **Current version** | **v0.8 — 2026-09-03** (`0.8.0`; see `docs/VERSIONS.md` and CONTRACT §11) |
+| **Current version** | **v0.9 — 2026-09-03** (`0.9.0`; see `docs/VERSIONS.md` and CONTRACT §11) |
 | Unit/integration tests | **710** (Vitest), green |
-| End-to-end specs | **27** (Playwright, Chromium at 390×844), green |
+| End-to-end specs | **28** (Playwright, Chromium at 390×844), green |
 | Type check | `npm run check` clean across **536** files |
 | Migrations applied | **004** (`PRAGMA user_version = 4`) |
-| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6, M7 and M8 |
+| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6, M7, M8 and M9 |
 | Reviewer audits | M1 ×3, M2, M3, M4, **M6** — all closed, findings acted on |
 
 It is running in production on the owner's home server at `zembil.s3r4.tech`, fronted by a
@@ -112,6 +113,7 @@ It is running in production on the owner's home server at `zembil.s3r4.tech`, fr
 | **M6** Five features | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password | ✅ — schema delta is migration 002; contract addendum is §8 |
 | **M7** Delete a shop | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been | ✅ — **no migration**; contract addendum is §9 |
 | **M8** Visibility authority, themes, versioning | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side; a version number, shown behind the session | ✅ — **v0.8**; schema delta is migration 004; contract addenda are §10 and §11 |
+| **M9** Item authorship, a claim strip that knows when nobody's listening | The item detail sheet now says who added an item and when (`items.createdByName`, already on the wire since migration 001); the claim strip no longer renders on a private shop, on the list screen or the home-screen card | ✅ — **v0.9**; **no migration**; **no contract addendum** — both fields already existed |
 
 ---
 
@@ -720,6 +722,11 @@ Read this section before you trust a claim made elsewhere in the docs.
   column, the root `load` carries it, and `hooks.server.ts` substitutes it into `<html data-theme>`
   before the document leaves the process. No cookie was needed after all — the session already
   identifies the member, and the member already has a row.
+- **A ticked item's authorship is not visible.** M9 (D-049) put "Added by …" in the item detail sheet,
+  but `ItemRow` only offers the edit affordance that opens it on a *pending* row — a ticked row shows
+  Undo in that slot instead. So the sheet answers "who added this" for anything still on the list, but
+  not for anything already in the basket. Closing it means giving ticked rows a read-only detail view,
+  which is a change to `ItemRow`'s tap targets and out of scope for what M9 was asked to do.
 
 ---
 

@@ -76,6 +76,16 @@ test('add, tick, un-tick and undo on one list', async ({ page }) => {
 	await expect(row(page, 'Süt')).toHaveAttribute('aria-checked', 'true');
 });
 
+test('the item detail sheet says who added the item', async ({ page }) => {
+	await addStore(page, 'Author Shop');
+	await openAdd(page);
+	await addItem(page, 'Zeytinyağı');
+	await closeSheet(page);
+
+	await page.getByRole('button', { name: 'Edit Zeytinyağı' }).click();
+	await expect(page.getByText(/Added by admin/)).toBeVisible();
+});
+
 test('finishing a trip carries the unticked items to the next one', async ({ page }) => {
 	await addStore(page, 'Pazar');
 	await openAdd(page);

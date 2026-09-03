@@ -30,8 +30,10 @@
 			{/if}
 		</span>
 		<!-- §8.6: who is going. The home screen is where this is most useful —
-		     it is what stops two people driving to the same shop. -->
-		{#if store.claimedByName}
+		     it is what stops two people driving to the same shop. A private
+		     store is visible to its owner alone, so this would only ever
+		     announce a trip to yourself — skip it there. -->
+		{#if store.visibility !== 'private' && store.claimedByName}
 			<span class="claim z-meta">
 				{store.claimedByMe ? m.claimByMe : m.cardClaimed(store.claimedByName)}
 				{#if store.claimNote}<span class="note">· “{store.claimNote}”</span>{/if}

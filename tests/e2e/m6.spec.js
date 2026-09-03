@@ -154,11 +154,20 @@ test('a second member is offered "take over" rather than silently displacing any
 test('making a shop private hides it from everyone else', async ({ page, browser }) => {
 	const path = await addStore(page, 'Private Shop');
 
+	// Public: the claim strip is there to offer, since the point of "I'm going"
+	// is telling someone else.
+	await expect(page.getByRole('button', { name: 'I’m going to this shop' })).toBeVisible();
+
 	await page.getByRole('button', { name: 'Shop settings' }).click();
 	await page.getByRole('button', { name: 'Only me' }).click();
 	await expect(page.getByText(/Only you can see this shop/)).toBeVisible();
 	await closeSheet(page);
 	await expect(page.getByText('Only you').first()).toBeVisible();
+
+	// Private: nobody else can ever see this shop, so announcing a trip to
+	// yourself has no reader. The whole claim strip goes away.
+	await expect(page.getByRole('button', { name: 'I’m going to this shop' })).toBeHidden();
+	await expect(page.getByText('Nobody is going yet.')).toBeHidden();
 
 	// The other member signed in earlier; a fresh context for them proves the
 	// shop is gone from the server's answers, not just from this screen.
@@ -186,6 +195,7 @@ test('making a shop private hides it from everyone else', async ({ page, browser
 	await page.getByRole('button', { name: 'Everyone' }).click();
 	await expect(page.getByText(/Everyone signed in sees this shop/)).toBeVisible();
 	await closeSheet(page);
+	await expect(page.getByRole('button', { name: 'I’m going to this shop' })).toBeVisible();
 });
 
 test('switching language changes the interface, and it survives a reload', async ({ page }) => {

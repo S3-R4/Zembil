@@ -106,6 +106,7 @@ export const tr: Messages = {
 
 	itemSheetTitle: 'Ürün',
 	itemInStore: (store: string) => `${store} listesinde`,
+	itemAddedBy: (name: string, when: string) => `Ekleyen: ${name} · ${when}`,
 	rowUndo: 'Geri al',
 	rowEdit: (name: string) => `${name} — düzenle`,
 	rowCarried: (n: number) => plural(L, n, { other: `${n} kez devredildi` }),

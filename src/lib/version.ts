@@ -35,7 +35,7 @@
  * `docs/VERSIONS.md`. PROJECT.md §2 quotes the current version too. All four
  * are asserted or read by something, so none of them is decoration.
  */
-export const VERSION = '0.8.0';
+export const VERSION = '0.9.0';
 
 /** `YYYY-MM-DD`, in UTC, of the day this version was cut. */
 export const RELEASED_ON = '2026-09-03';

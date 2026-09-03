@@ -102,6 +102,7 @@ export const de: Messages = {
 
 	itemSheetTitle: 'Artikel',
 	itemInStore: (store: string) => `Bei ${store}`,
+	itemAddedBy: (name: string, when: string) => `Hinzugefügt von ${name} · ${when}`,
 	rowUndo: 'Rückgängig',
 	rowEdit: (name: string) => `${name} bearbeiten`,
 	rowCarried: (n: number) =>

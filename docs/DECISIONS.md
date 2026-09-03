@@ -1429,3 +1429,46 @@ what it should be: it is a fact somebody goes looking for, never one they read o
 a `<footer>` rather than another `.z-panel` because it is not a setting and nothing in it can be
 tapped. The e2e suite asserts the size ceiling, the absence of any control inside it, and that it
 sits below the last button — so "subtle" is a testable claim rather than a note in a review.
+
+---
+
+## D-049 — Item authorship surfaced in the detail sheet, not on every row; the claim strip skipped on a private shop
+
+**Status:** accepted (M9). **Contract:** none — no schema or API change.
+
+Two small, owner-requested changes. Neither needed a migration or a contract addendum: `items.created_by`
+/ `createdByName` has been on the wire since migration 001 (§1.1, §1.2 I-question of authorship
+preservation across carry-over), and `stores.visibility` has been on `StoreSummary` since M6 (§8). Both
+changes are the frontend finally reading fields the backend already sent.
+
+**Where "who added this" went, and where it did not.** `design/Zembil.dc.html`'s "Item detail / edit"
+artboard already showed "Added by Anne · Tuesday 18:40" under the item name — the canvas had this
+designed before the request landed, the frontend just never built it. It is rendered in the item
+detail sheet (`editing?.createdByName`, with `relative(editing.createdAt)` for "when", matching the
+idiom `you`'s passkey list already uses for "Used 2 minutes ago") rather than as a fourth line on
+every `ItemRow`. Rejected: putting it on the row itself. A row is already carrying up to three lines —
+name, note, carried-count — inside a deliberately compact 68px tap target (DESIGN.md, the 44px tap-target
+rule); a fourth, unconditional line for information that matters occasionally, not on every glance,
+would make authorship the busiest thing about the row it sits in. The detail sheet is one tap away (the
+edit icon) and already carries the store name as secondary metadata — authorship belongs beside it, not
+competing with the checkbox.
+
+Known limitation, not created by this decision but exposed by it: the detail sheet only opens from a
+*pending* row — `ItemRow` shows Undo instead of the edit icon once an item is ticked — so there is
+currently no way to see who added an item once it is in the basket. Recorded in PROJECT.md §13 rather
+than worked around here, because fixing it means changing what a ticked row's tap targets do, which is
+a separate decision from where authorship is displayed.
+
+**Why the claim strip disappears on a private shop, not just its wording.** `stores.private_to` limits
+visibility to exactly one member (§8.4) — a private shop's owner is the only person who can ever load
+`/s/{storeId}`. The claim strip exists to answer "who is going, so two people don't drive to the same
+shop" (§8.6); with one possible reader who is also the only possible claimant, it can only ever be
+reporting your own state back to you. The fix removes the whole strip — `{#if store?.visibility !==
+'private'}` around the block in the list screen, and the equivalent guard around the read-only line on
+the home-screen `StoreCard` — rather than relabelling the button. Rejected: keeping the strip with
+different copy for a private shop. That still puts a control on screen whose only purpose most members
+would ask about is exactly the one the owner raised — a control that exists for nobody is better absent
+than explained. Also rejected: refusing `POST /api/stores/{id}/claim` for a private shop at the API
+layer. There is no authorization boundary to close here — §8.4 already gates every store-scoped
+endpoint to the owner alone, so a private-shop self-claim is harmless to leave reachable, and this is a
+UI-only decision about what is worth showing, not a security one.

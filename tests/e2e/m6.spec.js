@@ -24,6 +24,17 @@ async function addStore(page, name) {
 
 /** @param {import('@playwright/test').Page} page */
 const closeSheet = (page) => page.keyboard.press('Escape');
+/** @param {import('@playwright/test').Page} page */
+const openAdd = (page) => page.getByRole('button', { name: 'Add an item' }).click();
+/**
+ * @param {import('@playwright/test').Page} page
+ * @param {string} name
+ */
+async function addItem(page, name) {
+	await page.getByPlaceholder('Item', { exact: true }).fill(name);
+	await page.getByRole('button', { name: /^Add to / }).click();
+	await expect(page.getByText(`Added “${name}”`)).toBeVisible();
+}
 
 /**
  * A context that is NOT the signed-in admin.
@@ -151,12 +162,21 @@ test('a second member is offered "take over" rather than silently displacing any
 	await second.close();
 });
 
-test('making a shop private hides it from everyone else', async ({ page, browser }) => {
+test('making a shop private hides it from everyone else, item authorship included', async ({
+	page,
+	browser
+}) => {
 	const path = await addStore(page, 'Private Shop');
 
+	await openAdd(page);
+	await addItem(page, 'Peynir');
+	await closeSheet(page);
+
 	// Public: the claim strip is there to offer, since the point of "I'm going"
-	// is telling someone else.
+	// is telling someone else. Authorship is real information too, with more
+	// than one possible reader.
 	await expect(page.getByRole('button', { name: 'I’m going to this shop' })).toBeVisible();
+	await expect(page.getByText(/Added by admin/)).toBeVisible();
 
 	await page.getByRole('button', { name: 'Shop settings' }).click();
 	await page.getByRole('button', { name: 'Only me' }).click();
@@ -165,9 +185,12 @@ test('making a shop private hides it from everyone else', async ({ page, browser
 	await expect(page.getByText('Only you').first()).toBeVisible();
 
 	// Private: nobody else can ever see this shop, so announcing a trip to
-	// yourself has no reader. The whole claim strip goes away.
+	// yourself has no reader. The whole claim strip goes away — and so does
+	// "who added this", since the shop's one possible reader is also its one
+	// possible author.
 	await expect(page.getByRole('button', { name: 'I’m going to this shop' })).toBeHidden();
 	await expect(page.getByText('Nobody is going yet.')).toBeHidden();
+	await expect(page.getByText(/Added by admin/)).toBeHidden();
 
 	// The other member signed in earlier; a fresh context for them proves the
 	// shop is gone from the server's answers, not just from this screen.
@@ -196,6 +219,7 @@ test('making a shop private hides it from everyone else', async ({ page, browser
 	await expect(page.getByText(/Everyone signed in sees this shop/)).toBeVisible();
 	await closeSheet(page);
 	await expect(page.getByRole('button', { name: 'I’m going to this shop' })).toBeVisible();
+	await expect(page.getByText(/Added by admin/)).toBeVisible();
 });
 
 test('switching language changes the interface, and it survives a reload', async ({ page }) => {

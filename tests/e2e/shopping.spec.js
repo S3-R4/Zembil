@@ -76,13 +76,17 @@ test('add, tick, un-tick and undo on one list', async ({ page }) => {
 	await expect(row(page, 'Süt')).toHaveAttribute('aria-checked', 'true');
 });
 
-test('the item detail sheet says who added the item', async ({ page }) => {
+test('the item list shows who added each item, with no tap required', async ({ page }) => {
 	await addStore(page, 'Author Shop');
 	await openAdd(page);
 	await addItem(page, 'Zeytinyağı');
 	await closeSheet(page);
 
-	await page.getByRole('button', { name: 'Edit Zeytinyağı' }).click();
+	await expect(page.getByText(/Added by admin/)).toBeVisible();
+
+	// Still shown once ticked — a ticked row swaps Edit for Undo, but the
+	// authorship line lives on the row itself, not behind either affordance.
+	await row(page, 'Zeytinyağı').click();
 	await expect(page.getByText(/Added by admin/)).toBeVisible();
 });
 

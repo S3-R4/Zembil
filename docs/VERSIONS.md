@@ -19,6 +19,21 @@ against a contract frozen first (D-031), which is why four "releases" share a da
 
 ---
 
+## v0.9.1 — 2026-09-03
+
+**Item authorship moved onto the list itself.** (M9 patch)
+
+- "Added by … · …" now renders directly on `ItemRow`, for both pending and ticked items, with no tap
+  required — it had shipped in the item detail sheet only, one edit-tap away. Closes the PROJECT.md
+  §13 gap about a ticked item's authorship being unreachable, since the row shows it regardless of
+  state. D-050.
+- Authorship no longer renders at all on a private shop: `stores.private_to` limits a private shop to
+  exactly one reader (§8.4), who is also the only member who could ever have added an item to it, so
+  naming them is not information. Mirrors the claim strip's own private-shop guard from v0.9. D-050.
+- No migration, no contract change — same wire fields as v0.9, read one layer further down.
+
+---
+
 ## v0.9 — 2026-09-03
 
 **Who added it, and a claim strip that knows when nobody's listening.** (M9)

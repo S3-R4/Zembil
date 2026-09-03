@@ -9,15 +9,20 @@
 <script lang="ts">
 	import type { Item } from '$lib/types';
 	import { messages } from '$lib/client/i18n';
+	import { relative } from '$lib/client/time';
 
 	interface Props {
 		item: Item;
 		busy: boolean;
+		/** §8.4: a private store has exactly one possible reader, who is also its
+		 *  only possible author — "who added this" is meaningless there, so the
+		 *  caller passes false rather than this component reading visibility itself. */
+		showAuthor: boolean;
 		ontoggle: (item: Item) => void;
 		onopen: (item: Item) => void;
 	}
 
-	let { item, busy, ontoggle, onopen }: Props = $props();
+	let { item, busy, showAuthor, ontoggle, onopen }: Props = $props();
 	let ticked = $derived(item.state === 'ticked');
 
 	const m = $derived(messages());
@@ -51,6 +56,9 @@
 			{#if item.note}<span class="note">{item.note}</span>{/if}
 			{#if item.carryCount > 0 && !ticked}
 				<span class="note carried">{m.rowCarried(item.carryCount)}</span>
+			{/if}
+			{#if showAuthor && item.createdByName}
+				<span class="note author">{m.itemAddedBy(item.createdByName, relative(item.createdAt))}</span>
 			{/if}
 		</span>
 	</button>

@@ -13,7 +13,6 @@
 	import { ApiError, newClientId } from '$lib/client/api';
 	import { messages } from '$lib/client/i18n';
 	import { STORE_COLORS } from '$lib/client/palette';
-	import { relative } from '$lib/client/time';
 	import Banner from '$lib/components/Banner.svelte';
 	import ItemRow from '$lib/components/ItemRow.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
@@ -420,6 +419,7 @@
 					<ItemRow
 						{item}
 						busy={list.busy.has(item.id)}
+						showAuthor={store?.visibility !== 'private'}
 						ontoggle={(i) => list.tick(i)}
 						onopen={openItem}
 					/>
@@ -435,6 +435,7 @@
 						<ItemRow
 							{item}
 							busy={list.busy.has(item.id)}
+							showAuthor={store?.visibility !== 'private'}
 							ontoggle={(i) => list.untick(i)}
 							onopen={openItem}
 						/>
@@ -495,12 +496,6 @@
 <!-- Item detail -->
 <Sheet open={editing !== null} title={m.itemSheetTitle} onclose={() => (editing = null)}>
 	<Banner message={editError} />
-	<!-- design/Zembil.dc.html "Item detail / edit" artboard: who added it, right
-	     under the title. `createdByName` is null only if that account was since
-	     deleted (ON DELETE SET NULL), so the line is omitted rather than blank. -->
-	{#if editing?.createdByName}
-		<p class="z-meta">{m.itemAddedBy(editing.createdByName, relative(editing.createdAt))}</p>
-	{/if}
 	<form onsubmit={saveItem}>
 		<label class="sr-only" for="edit-name">{m.addItemPlaceholder}</label>
 		<input class="z-field" id="edit-name" maxlength="200" bind:value={editName} />

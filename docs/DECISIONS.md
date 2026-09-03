@@ -1472,3 +1472,44 @@ than explained. Also rejected: refusing `POST /api/stores/{id}/claim` for a priv
 layer. There is no authorization boundary to close here — §8.4 already gates every store-scoped
 endpoint to the owner alone, so a private-shop self-claim is harmless to leave reachable, and this is a
 UI-only decision about what is worth showing, not a security one.
+
+---
+
+## D-050 — Reversing D-049: authorship moves onto every row, and is hidden on a private shop
+
+**Status:** accepted (M9 patch, v0.9.1). **Contract:** none — no schema or API change. **Supersedes**
+D-049's row-placement reasoning; D-049's claim-strip reasoning stands unchanged.
+
+**This corrects a decision the owner rejected on first use**, not a bug found in testing. D-049 argued
+that a fourth unconditional line on `ItemRow` would make authorship "the busiest thing about the row",
+and put "Added by …" one edit-tap away in the detail sheet instead. Using the feature as shipped, the
+owner reported the actual result of that call: nobody looks at a name they have to tap Edit to see, so
+in practice authorship was invisible. That is a real defect in the decision, not a matter of taste — a
+feature requested to be "visible somewhere" that requires a deliberate extra tap to ever be seen has
+not actually shipped the thing that was asked for. D-049's argument about row density was not wrong on
+its own terms; it was answering the wrong question. The row is now the one place this information can
+actually do its job, so it goes there, and the sheet's now-duplicate copy is removed rather than kept
+alongside it — one place to look, not two that can say different things while a save is in flight.
+
+**Consequence for `ItemRow`.** `showAuthor: boolean` becomes a required prop, computed by the caller
+(`store?.visibility !== 'private'`, see below) rather than read from `store` inside the component —
+`ItemRow` has no access to the store, only the item, and does not need one. The line renders in both
+the pending and ticked `{#each}` blocks, which also closes the PROJECT.md §13 gap D-049 recorded
+("a ticked item's authorship is not visible"): that gap existed only because the sheet was reachable
+from a pending row alone, and the row itself has never distinguished pending from ticked for this
+purpose.
+
+**Why a private shop hides it, not just relocates it.** The owner's second point extends `stores.private_to`'s
+consequence (§8.4) one step further than D-049 did. D-049 already reasoned that a private shop's one
+possible reader is also its one possible *claimant*, and removed the claim strip on that basis. The
+identical fact — one reader, and every store-scoped write requires being that one member (§8.4) — also
+makes that reader the shop's only possible *author*. "Added by admin" on a shop only admin can ever add
+to is not a fact about the item, it is a restatement of who is looking at the screen. The missed
+symmetry was mine, not a new rule the owner invented: D-049 solved this exact shape for the claim strip
+and simply was not asked to check whether the same shape recurred elsewhere in the same milestone. It
+did.
+
+**Consequence.** `showAuthor` is threaded from `+page.svelte`, which already holds `store.visibility`,
+down to both `<ItemRow>` call sites — the same guard shape as the claim strip's
+`{#if store?.visibility !== 'private'}`, applied one component lower. No new i18n key: `itemAddedBy`
+already existed for the sheet and reads identically on the row.

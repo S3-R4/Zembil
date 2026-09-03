@@ -88,7 +88,7 @@ Every milestone through M5 was audited and every blocking finding closed.
 
 | Signal | Value |
 |---|---|
-| **Current version** | **v0.9 — 2026-09-03** (`0.9.0`; see `docs/VERSIONS.md` and CONTRACT §11) |
+| **Current version** | **v0.9.1 — 2026-09-03** (`0.9.1`; see `docs/VERSIONS.md` and CONTRACT §11) |
 | Unit/integration tests | **710** (Vitest), green |
 | End-to-end specs | **28** (Playwright, Chromium at 390×844), green |
 | Type check | `npm run check` clean across **536** files |
@@ -113,7 +113,7 @@ It is running in production on the owner's home server at `zembil.s3r4.tech`, fr
 | **M6** Five features | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password | ✅ — schema delta is migration 002; contract addendum is §8 |
 | **M7** Delete a shop | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been | ✅ — **no migration**; contract addendum is §9 |
 | **M8** Visibility authority, themes, versioning | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side; a version number, shown behind the session | ✅ — **v0.8**; schema delta is migration 004; contract addenda are §10 and §11 |
-| **M9** Item authorship, a claim strip that knows when nobody's listening | The item detail sheet now says who added an item and when (`items.createdByName`, already on the wire since migration 001); the claim strip no longer renders on a private shop, on the list screen or the home-screen card | ✅ — **v0.9**; **no migration**; **no contract addendum** — both fields already existed |
+| **M9** Item authorship, a claim strip that knows when nobody's listening | Every item row says who added it and when (`items.createdByName`, already on the wire since migration 001), hidden on a private shop along with the claim strip, which itself no longer renders there, on the list screen or the home-screen card | ✅ — **v0.9.1**; **no migration**; **no contract addendum** — both fields already existed; v0.9.1 (D-050) moved authorship from the detail sheet onto the row itself after the owner tried v0.9 |
 
 ---
 
@@ -722,11 +722,9 @@ Read this section before you trust a claim made elsewhere in the docs.
   column, the root `load` carries it, and `hooks.server.ts` substitutes it into `<html data-theme>`
   before the document leaves the process. No cookie was needed after all — the session already
   identifies the member, and the member already has a row.
-- **A ticked item's authorship is not visible.** M9 (D-049) put "Added by …" in the item detail sheet,
-  but `ItemRow` only offers the edit affordance that opens it on a *pending* row — a ticked row shows
-  Undo in that slot instead. So the sheet answers "who added this" for anything still on the list, but
-  not for anything already in the basket. Closing it means giving ticked rows a read-only detail view,
-  which is a change to `ItemRow`'s tap targets and out of scope for what M9 was asked to do.
+- ~~**A ticked item's authorship is not visible.**~~ **Closed in v0.9.1** (D-050): "Added by …" moved
+  from the item detail sheet onto `ItemRow` itself, rendered for pending and ticked rows alike, so it no
+  longer depends on which affordance a row happens to show in that state.
 
 ---
 

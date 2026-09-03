@@ -106,6 +106,8 @@ describe('§3.4 — stores', () => {
 					'tickedCount',
 					// §8.6: StoreSummary gains visibility and the four Claim fields.
 					'visibility',
+					// §8.4a: and who may change that visibility, computed per request.
+					'canChangeVisibility',
 					'claimedByName',
 					'claimedByMe',
 					'claimedAt',

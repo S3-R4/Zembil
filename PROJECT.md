@@ -56,14 +56,15 @@ today, and there should not be one until someone asks for the feature.
 
 **Complete and deployed**, plus **M6**, which added five owner-requested features: batched push
 notifications, trip claims, Turkish and German, private shops, and click-to-copy for the one-time
-password, and **M7**, which added permanent store deletion and replaced the shop-settings icon.
+password, **M7**, which added permanent store deletion and replaced the shop-settings icon, and
+**M8**, which put the visibility control behind a principal and moved the theme onto the account.
 Every milestone through M5 was audited and every blocking finding closed.
 
 | Signal | Value |
 |---|---|
-| Unit/integration tests | **670** (Vitest), green |
-| End-to-end specs | **21** (Playwright, Chromium at 390×844), green |
-| Type check | `npm run check` clean across **527** files |
+| Unit/integration tests | **699** (Vitest), green |
+| End-to-end specs | **24** (Playwright, Chromium at 390×844), green |
+| Type check | `npm run check` clean across **532** files |
 | Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6 and M7 |
 | Reviewer audits | M1 ×3, M2, M3, M4, **M6** — all closed, findings acted on |
 
@@ -83,6 +84,7 @@ It is running in production on the owner's home server at `zembil.s3r4.tech`, fr
 | **M5** Hardening | Act on all findings, re-verify the done-means checklist against a rebuilt image | ✅ |
 | **M6** Five features | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password | ✅ — schema delta is migration 002; contract addendum is §8 |
 | **M7** Delete a shop | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been | ✅ — **no migration**; contract addendum is §9 |
+| **M8** Visibility authority & themes | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side | ✅ — schema delta is migration 004; contract addendum is §10 |
 
 ---
 
@@ -129,6 +131,7 @@ users ──< sessions
       ──< webauthn_challenges
       ──< push_subscriptions   (M6: one row per browser that opted in)
       ──  locale               (M6: en | tr | de)
+      ──  theme                (M8: auto | light | dark | sepia | sage | contrast | indigo | plum)
 
 server_keys                    (M6: the VAPID keypair, one row)
 
@@ -136,7 +139,8 @@ stores ──< trips ──< items
    │         │
    │         └── claimed_by / claimed_at / claim_note   (M6: "I'm going to Migros")
    │
-   └── private_to              (M6: NULL = public, else visible to that user ALONE)
+   ├── private_to              (M6: NULL = public, else visible to that user ALONE)
+   └── created_by              (M8: the one principal, besides an admin, who may change that)
                       │
                       └── carried_from_item_id ─┐  lineage across rollovers
                           carried_to_item_id  ──┘  origin_item_id = root of chain
@@ -167,11 +171,12 @@ out:
 `pending` → `ticked` (undoable, stays visible, sorts below pending)
 `pending` → `carried` at close (**terminal**; a clone now lives on the next trip)
 
-### Invariants I-1 … I-18
+### Invariants I-1 … I-19
 
-`docs/CONTRACT.md` §1.2 lists thirteen invariants, and **§8.2 adds I-14 … I-18** for M6. Both say,
+`docs/CONTRACT.md` §1.2 lists thirteen invariants, **§8.2 adds I-14 … I-18** for M6, and **§10.2 adds
+I-19** for M8. All three say,
 normatively, **which are enforced by the schema and which only by tests.** That distinction matters: an invariant nobody enforces is a
-comment. Schema-bound: I-1, I-4, I-5 (partly), I-10, I-11, I-12, I-14, I-15, I-17. Test-bound: I-2, I-3, I-5
+comment. Schema-bound: I-1, I-4, I-5 (partly), I-10, I-11, I-12, I-14, I-15, I-17, I-19. Test-bound: I-2, I-3, I-5
 (the "closed trip" half), I-6, I-7, I-8, I-9, I-13, I-16, I-18.
 
 **I-16 is test-bound for a reason worth knowing before you add another invariant to an existing
@@ -315,6 +320,24 @@ being an admin does not.** The full table of which endpoint returns which 404 is
    mutation read the **database**. **A guard on a write is only observable through the write it did
    not perform.**
 
+**M8 added a second, separate question: who may *change* that (§10.1, D-046).** Seeing a list and
+deciding who else may see it are different powers, and until M8 they had the same gate — so any
+member could privatise a shared family shop and, under D-040, leave everybody else unable even to
+find out where it went. `visibility` on `PATCH /api/stores/{id}` now takes only the member named by
+`stores.created_by`, or an admin; everything else on that endpoint is unchanged. Three things not to
+undo:
+
+1. **§8.4 is resolved first and still wins.** A caller who cannot see the store gets the
+   byte-identical 404, *including an admin*. So the admin exemption only ever applies to a shop the
+   admin can already see. **D-040 is untouched, and a test asserts the 404 for the admin
+   specifically.**
+2. **The check runs inside the transaction and before the name key is recomputed.** Migration 003
+   scopes `name_key` by the owner, so a visibility change is also a rename; a guard placed after it
+   would leave a store public with a private key. A `{ name, visibility }` body from a caller who may
+   do the first but not the second writes **neither**, and the test proves that by reading the row.
+3. **`canChangeVisibility` is a hint, not the control.** It is a boolean on `StoreSummary`, computed
+   per request like `claimedByMe`, and never the creator's id — §3 keeps user ids off the wire.
+
 ### The three traps that have already bitten this codebase
 
 These are recorded because each cost real time and each will bite again:
@@ -382,9 +405,14 @@ The rules that are not negotiable because they come from the brief, not from tas
   and not `<html>`. Read `messages()` inside `$derived`, never into a module-level `$state` — that
   singleton is shared across concurrent SSR requests and would serve one member's language to
   another.
-- Colour tokens live on `:root`, overridden under `[data-theme="dark"]` *and* under
-  `@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme="light"])`, so the
-  Light/Auto/Dark control wins in both directions.
+- Colour tokens live on `:root`, overridden under `[data-theme="…"]` *and* under
+  `@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme]), :root[data-theme="auto"]`,
+  so the Theme control wins in both directions. **M8 made that guard name `auto` explicitly**: with
+  eight themes, "no attribute" can no longer stand in for "follow the OS", or `sepia` gets repainted
+  dark after sunset.
+- **The theme is on the account (`users.theme`), not the device**, and reaches `<html data-theme>`
+  during SSR the same way the locale reaches `<html lang>`. That is what closed the theme flash §13
+  used to list. `auto` is a *value* that gets written onto the element, not an absent attribute.
 - **`stores.color` is a palette *key*, never a hex value.** This keeps the value off the CSS path and
   lets the dark theme remap it.
 
@@ -565,8 +593,8 @@ seams that are left to convention drift.)
 
 | File | What it is | Authority |
 |---|---|---|
-| `docs/CONTRACT.md` | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — **plus §8, the M6 addendum** (migration 002, I-14…I-18, R-18…R-22, the visibility rule, claims, locale, push, the §3.0 delta) **and §9, the M7 addendum** (`DELETE /api/stores/{id}`, R-23, the §3.0 delta, and the confirmation rule that lives in the UI). | Normative. Build against this. |
-| `docs/DECISIONS.md` | D-001 … **D-045**, each with the reasoning and what was rejected. | Why things are the way they are. |
+| `docs/CONTRACT.md` | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — **plus §8, the M6 addendum** (migration 002, I-14…I-18, R-18…R-22, the visibility rule, claims, locale, push, the §3.0 delta), **§9, the M7 addendum** (`DELETE /api/stores/{id}`, R-23, the §3.0 delta, and the confirmation rule that lives in the UI) **and §10, the M8 addendum** (§8.4a — who may change visibility; migration 004 and `users.theme`; I-19; the `PATCH /api/me` delta). | Normative. Build against this. |
+| `docs/DECISIONS.md` | D-001 … **D-047**, each with the reasoning and what was rejected. | Why things are the way they are. |
 | `PLAN.md` | Stack, data model at a glance, file ownership, milestones with exit criteria, test strategy, known gaps. | Process record. |
 | `docs/DESIGN.md` | Colour tokens, type scale, metrics, screen list, layout rules — **and §6, the language rules** (why Turkish supplies one plural form, why no suffix is ever glued to a shop name, why German uses "Sie", and why a server error message is never translated by the client). | Distilled from the canvas. |
 | `design/Zembil.dc.html` | 22 artboards at 390×844. | **Visual source of truth** — beats `DESIGN.md`. |
@@ -648,9 +676,10 @@ Read this section before you trust a claim made elsewhere in the docs.
 - **A private shop cannot be recovered through the API.** Deliberate (D-040), documented in the README,
   and asserted by a test so nobody "fixes" it into an admin exemption by accident. Recovery is one
   `UPDATE`.
-- **Theme flash on an explicit Light/Dark override.** `Appearance` is applied on mount, so a member
-  who overrides their OS setting sees one frame of the other theme. The honest fix is a cookie read
-  in the root `load` — an inline script will not pass `kit.csp` in hash mode.
+- ~~**Theme flash on an explicit Light/Dark override.**~~ **Closed in M8** (D-047): the theme is a
+  column, the root `load` carries it, and `hooks.server.ts` substitutes it into `<html data-theme>`
+  before the document leaves the process. No cookie was needed after all — the session already
+  identifies the member, and the member already has a row.
 
 ---
 
@@ -677,7 +706,9 @@ Read this section before you trust a claim made elsewhere in the docs.
 
 ### Before you call it done
 
-- `npm test` (Vitest, 670) and `npm run test:e2e` (Playwright, 21) green.
+- `npm test` (Vitest, 699) and `npm run test:e2e` (Playwright, 24) green. **Build before the e2e
+  run** — `test:e2e` serves `build/index.js` and does not rebuild it, so a stale build silently tests
+  the previous commit.
 - `npm run check` clean.
 - **Run a mutation sweep over the guards you added.** Break each one; anything that stays green is a
   finding.

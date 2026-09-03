@@ -3,12 +3,12 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { api } from '$lib/client/api';
 	import { forgetLists, messageOf } from '$lib/client/app.svelte';
-	import { readAppearance, saveAppearance, type Appearance } from '$lib/client/theme';
+	import { applyTheme } from '$lib/client/theme';
 	import { relative } from '$lib/client/time';
 	import { messages } from '$lib/client/i18n';
 	import { LANGUAGE_NAMES } from '$lib/i18n';
 	import { disablePush, enablePush, readPushState, type PushState } from '$lib/client/push';
-	import { LOCALES, type Locale, type Passkey, type User } from '$lib/types';
+	import { LOCALES, THEMES, type Locale, type Passkey, type Theme, type User } from '$lib/types';
 	import Banner from '$lib/components/Banner.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
 
@@ -22,21 +22,14 @@
 	let passkeys = $derived(fetched ?? data.passkeys);
 	let error = $state<string | null>(null);
 	let busy = $state(false);
-	let appearance = $state<Appearance>('auto');
 	let passkeySupported = $state(false);
 
 	$effect(() => {
-		appearance = readAppearance();
 		passkeySupported =
 			typeof window !== 'undefined' &&
 			typeof window.PublicKeyCredential !== 'undefined' &&
 			typeof navigator.credentials?.create === 'function';
 	});
-
-	function choose(value: Appearance) {
-		appearance = value;
-		saveAppearance(value);
-	}
 
 	async function refresh() {
 		const body = await api<{ passkeys: Passkey[] }>('/api/me');
@@ -134,6 +127,49 @@
 			error = messageOf(err);
 		} finally {
 			localeBusy = false;
+		}
+	}
+
+	// ---- theme (§10.1) ------------------------------------------------------
+	// A dropdown rather than a segmented row, because eight options do not fit
+	// across a 390px phone and a native <select> gets the platform's own picker
+	// — a wheel on iOS, a sheet on Android — which is bigger than any 44px
+	// target we could draw and already knows about VoiceOver.
+	//
+	// The column is the source, so the flow is: PATCH, then `invalidateAll`,
+	// which re-runs the root load and re-applies the attribute from page data.
+	// `applyTheme` here is not a duplicate of that — it repaints on the tap
+	// rather than after the round trip, so the picker feels like a switch and
+	// not like a form.
+	let themeBusy = $state(false);
+
+	const THEME_LABELS: Record<Theme, () => string> = {
+		auto: () => m.themeAuto,
+		light: () => m.themeLight,
+		dark: () => m.themeDark,
+		sepia: () => m.themeSepia,
+		sage: () => m.themeSage,
+		contrast: () => m.themeContrast,
+		indigo: () => m.themeIndigo,
+		plum: () => m.themePlum
+	};
+
+	async function chooseTheme(next: Theme) {
+		if (themeBusy || next === data.user.theme) return;
+		const previous = data.user.theme;
+		themeBusy = true;
+		error = null;
+		applyTheme(next);
+		try {
+			await api<{ user: User }>('/api/me', { method: 'PATCH', body: { theme: next } });
+			await invalidateAll();
+		} catch (err) {
+			// The optimistic repaint has to be undone by hand: nothing re-rendered,
+			// so there is no load to fall back to.
+			applyTheme(previous);
+			error = messageOf(err);
+		} finally {
+			themeBusy = false;
 		}
 	}
 
@@ -296,23 +332,20 @@
 	</section>
 
 	<section class="z-panel">
-		<h2 class="z-card-title">{m.youAppearance}</h2>
-		<div class="segmented" role="group" aria-label={m.youAppearance}>
-			{#each ['light', 'auto', 'dark'] as const as option (option)}
-				<button
-					type="button"
-					class:on={appearance === option}
-					aria-pressed={appearance === option}
-					onclick={() => choose(option)}
-				>
-					{option === 'light'
-						? m.appearanceLight
-						: option === 'auto'
-							? m.appearanceAuto
-							: m.appearanceDark}
-				</button>
+		<h2 class="z-card-title">{m.youTheme}</h2>
+		<label class="sr-only" for="theme">{m.youTheme}</label>
+		<select
+			class="z-field theme-select"
+			id="theme"
+			disabled={themeBusy}
+			value={data.user.theme}
+			onchange={(event) => chooseTheme(event.currentTarget.value as Theme)}
+		>
+			{#each THEMES as option (option)}
+				<option value={option}>{THEME_LABELS[option]()}</option>
 			{/each}
-		</div>
+		</select>
+		<p class="z-meta faint">{themeBusy ? m.youThemeBusy : m.youThemeHelp}</p>
 	</section>
 
 	{#if data.user.isAdmin}
@@ -397,6 +430,30 @@
 
 	.faint {
 		color: var(--text-faint);
+	}
+
+	/* `.z-field` is written for inputs; a <select> additionally needs its native
+	 * chevron replaced, because the platform one is drawn in the OS's own colour
+	 * and vanishes against the darker themes. Two background gradients meeting
+	 * at a corner draw it in a token colour instead — a <select> cannot carry a
+	 * pseudo-element, and this needs no extra request. */
+	.theme-select {
+		appearance: none;
+		padding-right: 46px;
+		background-image:
+			linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
+			linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+		background-position:
+			right 24px center,
+			right 18px center;
+		background-size:
+			6px 6px,
+			6px 6px;
+		background-repeat: no-repeat;
+	}
+
+	.theme-select:disabled {
+		color: var(--text-disabled);
 	}
 
 	.segmented {

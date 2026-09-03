@@ -1,0 +1,27 @@
+-- ============================================================================
+-- Zembil migration 004 — users.theme
+-- ============================================================================
+--
+-- Forward-only and additive: one ALTER TABLE ADD COLUMN with a NOT NULL DEFAULT
+-- and a column-level CHECK, which this build enforces afterwards (verified in
+-- migration 002's header, same mechanism).
+--
+-- The theme moves from the DEVICE to the ACCOUNT, and that is the whole point
+-- of the change. It used to live in `localStorage`, which meant three things:
+-- a member who picked Dark on the phone met Light on the tablet; a new browser
+-- always started on the OS default; and — because localStorage cannot be read
+-- during SSR — the first paint was always the OS theme and the chosen one
+-- arrived a frame later. PROJECT.md §13 listed that flash as a known gap whose
+-- honest fix was "read it on the server". This is that fix: the column is read
+-- by the root `load` and substituted into `<html data-theme>` before the
+-- document leaves the process, exactly as `locale` already was (§8.5).
+--
+-- 'auto' is the default because it is what every existing row was effectively
+-- on: the previous default set no attribute at all and let the OS decide.
+--
+-- The value is a THEME KEY, never a colour. Same rule as `stores.color`
+-- (D-017): keeping hex off the database keeps it off the CSS path, and lets a
+-- palette be retuned in `app.css` without a migration.
+-- ---------------------------------------------------------------------------
+ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'auto'
+      CHECK (theme IN ('auto','light','dark','sepia','sage','contrast','indigo','plum'));

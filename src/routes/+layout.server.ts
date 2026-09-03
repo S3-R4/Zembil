@@ -1,5 +1,6 @@
 import type { LayoutServerLoad } from './$types';
 import { negotiateAcceptLanguage } from '$lib/server/auth/locale';
+import { DEFAULT_THEME } from '$lib/types';
 
 /**
  * `locals.user` is set by hooks.server.ts from the session cookie and from
@@ -22,5 +23,11 @@ export const load: LayoutServerLoad = ({ locals, request }) => ({
 	user: locals.user,
 	locale: locals.user
 		? locals.user.locale
-		: negotiateAcceptLanguage(request.headers.get('accept-language'))
+		: negotiateAcceptLanguage(request.headers.get('accept-language')),
+	// The theme rides along for the same reason and with the same shape. The
+	// SSR'd document already carries it on `<html>` (hooks.server.ts); this copy
+	// is what lets the root layout re-apply it after an in-app change, which is
+	// a client-side navigation and does not re-render `<html>`. Signed out there
+	// is no member and no column, so it is `auto` and the device decides.
+	theme: locals.user ? locals.user.theme : DEFAULT_THEME
 });

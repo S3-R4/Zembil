@@ -1,17 +1,18 @@
 <script lang="ts">
 	import '../app.css';
-	import { applyAppearance, readAppearance } from '$lib/client/theme';
+	import { applyTheme, asTheme } from '$lib/client/theme';
 	import type { Snippet } from 'svelte';
 
-	let { children, data }: { children: Snippet; data: { locale: string } } = $props();
+	let { children, data }: { children: Snippet; data: { locale: string; theme: string } } =
+		$props();
 
-	// Applied on mount rather than from an inline script in app.html: `kit.csp`
-	// runs `script-src 'self'` with hashes for SvelteKit's own payload, and an
-	// inline script of ours would need a hash it cannot get. The cost is a brief
-	// flash for the minority who override the OS setting — 'auto' sets no
-	// attribute at all, so it matches prefers-color-scheme from the first paint.
+	// The theme is already on <html> when this document arrives — the server put
+	// it there (§10.1), which is what removed the old one-frame flash. This
+	// effect is for the OTHER path: picking a new theme on /you re-runs the root
+	// load and re-renders the body, but <html> is still the element that was
+	// served. Exactly the same asymmetry as `lang` below.
 	$effect(() => {
-		applyAppearance(readAppearance());
+		applyTheme(asTheme(data.theme));
 	});
 
 	// §8.5. The SSR'd document is already labelled correctly — `hooks.server.ts`

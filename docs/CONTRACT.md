@@ -1757,3 +1757,95 @@ is stated here because it is testable:
   to another member, and the tests that assert its absence now cover DELETE too.
 - **No recovery path.** There is no undo and no trash. Recovery is the operator's backup
   (`scripts/backup.sh`, §3.8 and the README), which is exactly what it is for.
+
+---
+
+## 10. Addendum 4 — who may change visibility, and the interface theme (M8, migration 004)
+
+Two changes, unrelated to each other except in that both are about a member's own control over what
+they see. §8 (the visibility rule) and §8.5 (locale) are the sections they extend; neither is
+rewritten.
+
+### 10.1 §8.4a — visibility is a power, and not everyone who can see a store holds it
+
+§8.4 says who may **see** a store. It said nothing about who may decide who sees it, and the answer
+that fell out of §8.6 was "anybody who can see it" — so any member could privatise a shared family
+shop, which under D-040 takes it away from everyone else with no way back for them, in one tap.
+Seeing a list and deciding who else may see it are different powers.
+
+**The rule.** `PATCH /api/stores/{storeId}` accepts the `visibility` field **only** from:
+
+- the member named by `stores.created_by`, or
+- an admin (`users.is_admin = 1`).
+
+Anything else is **`403 FORBIDDEN`**, with §3.1's envelope and no sibling field.
+
+Six things about it that are normative:
+
+1. **§8.4 is resolved first and still wins.** A caller who cannot see the store gets the
+   byte-identical `404 STORE_NOT_FOUND` — including an admin, who under D-040 cannot see another
+   member's private store. A `403` there would confirm the store exists and belongs to somebody. In
+   practice this means the admin exemption only ever applies to a store the admin can already see,
+   which is the intended scope: it is a way to undo a privatisation on a *shared* shop, not a
+   back door into a private one. **D-040 is untouched.**
+2. **The refusal takes the whole PATCH with it.** The check runs inside the write transaction and
+   before the name key is recomputed (migration 003 scopes `name_key` by the owner, so a visibility
+   change is also a rename). A body carrying `{ name, visibility }` from a caller who may do the
+   first but not the second writes **neither**. Asserted by reading the row back, per the write-seam
+   rule.
+3. **Nothing else on the endpoint is restricted.** `name`, `color`, `sortOrder` and `archived` remain
+   open to any member the store is visible to, exactly as before.
+4. **`created_by` is never a request field.** `visibility: 'private'` still means "private to the
+   caller" (§8.6), at every privilege level. There is no way to hand a store to somebody else or to
+   take one on their behalf.
+5. **A store whose creator's account was deleted** (`created_by IS NULL`, `ON DELETE SET NULL`) is
+   admin-only for this field. Null matches no actor id; it must not read as "everybody's".
+6. **`Actor.isAdmin` grants this and nothing else.** It is read from `locals.user.isAdmin` by
+   `actorOf` and from nowhere else, and it is **not** an input to `isVisibleTo`.
+
+**`StoreSummary` gains `canChangeVisibility: boolean`** (§7 delta) — true for the creator and for an
+admin, computed per request. It is a **rendering hint, not the control**: a client that ignores it
+and sends the PATCH anyway gets the 403. It is a boolean rather than a creator id for the same reason
+`claimedByMe` is: §3 keeps user ids off the wire for non-admins, and a `createdById` field would turn
+every shop into a record of who made it.
+
+**§3.0 delta.** `PATCH /api/stores/{id}` refused with `403` bumps nothing and emits nothing, like
+every other refusal.
+
+### 10.2 §10.2 — `users.theme`, and why the theme moved to the server
+
+Migration 004 adds one column:
+
+```sql
+ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'auto'
+      CHECK (theme IN ('auto','light','dark','sepia','sage','contrast','indigo','plum'));
+```
+
+**I-19 (schema-bound).** `users.theme` is one of those eight strings. Enforced by the CHECK, and by
+`validateTheme` at the request seam so a bad value is a `400` rather than a `500`.
+
+The value is a **theme key, never a colour** — the same rule as `stores.color` (D-017). It indexes a
+token block in `app.css`; no hex ever reaches the database.
+
+It replaces a `localStorage` value, and the move is the point:
+
+- **A member's phone and tablet now agree.** The old per-device value meant the same person met a
+  different app depending on which screen they picked up.
+- **It can be read during SSR.** `hooks.server.ts` substitutes it into `<html data-theme="…">` the
+  way it already substitutes `%zembil.lang%` (§8.5), so the first frame is correct. This closes the
+  theme flash PROJECT.md §13 listed as a known gap: the old value could only be read after mount, and
+  an inline script — the other obvious fix — cannot get a hash past `kit.csp` (D-026).
+
+**`auto` is a value, not an absent attribute.** With eight themes, "no attribute" can no longer stand
+in for "follow the OS": the `prefers-color-scheme` block is guarded on `:root:not([data-theme]),
+:root[data-theme='auto']`, so an explicit light-family theme survives an OS in dark mode. A signed-out
+document renders `auto`.
+
+**`PATCH /api/me` delta (§8.5).** The body is `{ locale?, theme? }`, and at least one must be
+**present** — presence, not truthiness, so `{ theme: null }` is a `400` rather than a silently
+dropped field. Both are validated before the `UPDATE`, so a half-valid body writes nothing. An empty
+body is `400 VALIDATION_FAILED`, unchanged. It bumps nothing and emits nothing (§8.9), and there is
+still no parameter naming a user, at any privilege level.
+
+**`User` gains `theme: Theme`** (§7 delta), carried by `GET /api/me`, by `locals.user`, and by the
+root `load`.

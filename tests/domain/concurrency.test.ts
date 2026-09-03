@@ -159,7 +159,7 @@ describe('R-11 — concurrent close', () => {
 				.prepare('SELECT COUNT(*) AS n FROM items WHERE carried_from_item_id IS NOT NULL')
 				.get() as any;
 			expect(Number(clones.n)).toBe(2);
-			expect(getOpenList(h.db, store.id, actor.id).items).toHaveLength(2);
+			expect(getOpenList(h.db, store.id, actor).items).toHaveLength(2);
 			expect(checkAll(h.db)).toEqual([]);
 		} finally {
 			h.close();
@@ -240,7 +240,7 @@ describe('R-12 — an add racing a close is never lost, in either ordering', () 
 			expect(result.carriedCount).toBe(1);
 			const original = h.db.prepare('SELECT * FROM items WHERE id = ?').get(added.item.id) as any;
 			expect(original.state).toBe('carried');
-			const list = getOpenList(h.db, store.id, actor.id);
+			const list = getOpenList(h.db, store.id, actor);
 			expect(list.items.map((i) => i.name)).toEqual(['Milk']);
 			expect(list.items[0].id).not.toBe(added.item.id);
 			expect(list.trip.id).toBe(result.newTrip.id);
@@ -257,7 +257,7 @@ describe('R-12 — an add racing a close is never lost, in either ordering', () 
 
 			const added = addItem(h.db, store.id, { name: 'Milk', clientId: randomUUID() }, actor);
 			expect(added.item.tripId).toBe(result.newTrip.id);
-			expect(getOpenList(h.db, store.id, actor.id).items.map((i) => i.name)).toEqual(['Bread', 'Milk']);
+			expect(getOpenList(h.db, store.id, actor).items.map((i) => i.name)).toEqual(['Bread', 'Milk']);
 		} finally {
 			h.close();
 		}

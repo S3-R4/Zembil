@@ -13,6 +13,7 @@
  * wrong member.
  */
 import type { Db } from '../db/index.js';
+import type { Actor } from './stores.js';
 import type {
 	Claim,
 	Item,
@@ -164,6 +165,7 @@ export interface StoreSummaryRow extends ClaimRow {
 	rev: number;
 	archived_at: number | null;
 	private_to: string | null;
+	created_by: string | null;
 	open_trip_id: string | null;
 	pending_count: number;
 	ticked_count: number;
@@ -180,7 +182,7 @@ export interface StoreSummaryRow extends ClaimRow {
  * the ones already in history.
  */
 export const STORE_SUMMARY_SELECT = `
-  SELECT s.id, s.name, s.color, s.sort_order, s.rev, s.archived_at, s.private_to,
+  SELECT s.id, s.name, s.color, s.sort_order, s.rev, s.archived_at, s.private_to, s.created_by,
          ot.id AS open_trip_id,
          ot.claimed_by AS claimed_by, ot.claimed_at AS claimed_at, ot.claim_note AS claim_note,
          cb.display_name AS claimed_by_name,
@@ -195,7 +197,24 @@ export const STORE_SUMMARY_SELECT = `
     LEFT JOIN users cb ON cb.id = ot.claimed_by
 `;
 
-export function toStoreSummary(row: StoreSummaryRow, actorId: string): StoreSummary {
+/**
+ * Who may change this store's visibility — the client's half of the guard the
+ * domain layer enforces in `updateStore`.
+ *
+ * It is a BOOLEAN, computed per request, and never the creator's user id: §3
+ * forbids user ids on the wire for non-admins, so a `createdById` field would
+ * turn every shop into a directory of who created it. Same reasoning as
+ * `claimedByMe`, and the same shape.
+ *
+ * This is a rendering hint, not the control. A client that ignores it and sends
+ * the PATCH anyway gets `403 FORBIDDEN` from the one place the rule lives.
+ */
+function canChangeVisibility(row: StoreSummaryRow, actor: Actor): boolean {
+	return actor.isAdmin === true || (row.created_by ?? null) === actor.id;
+}
+
+export function toStoreSummary(row: StoreSummaryRow, actor: Actor): StoreSummary {
+	const actorId = actor.id;
 	const privateTo = row.private_to ?? null;
 	const visibility: StoreVisibility = privateTo === null ? 'public' : 'private';
 	return {
@@ -214,6 +233,7 @@ export function toStoreSummary(row: StoreSummaryRow, actorId: string): StoreSumm
 		archivedAt:
 			row.archived_at === null || row.archived_at === undefined ? null : Number(row.archived_at),
 		visibility,
+		canChangeVisibility: canChangeVisibility(row, actor),
 		...toClaim(row, actorId)
 	};
 }
@@ -223,11 +243,11 @@ export function toStoreSummary(row: StoreSummaryRow, actorId: string): StoreSumm
  * gone through `requireVisibleStore` first (§8.4). It is not exported beyond the
  * domain layer for that reason.
  */
-export function readStoreSummary(db: Db, storeId: string, actorId: string): StoreSummary | null {
+export function readStoreSummary(db: Db, storeId: string, actor: Actor): StoreSummary | null {
 	const row = db.prepare(`${STORE_SUMMARY_SELECT} WHERE s.id = ?`).get(storeId) as
 		| StoreSummaryRow
 		| undefined;
-	return row ? toStoreSummary(row, actorId) : null;
+	return row ? toStoreSummary(row, actor) : null;
 }
 
 export function readItem(db: Db, itemId: string): Item | null {

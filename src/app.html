@@ -1,8 +1,11 @@
 <!doctype html>
-<!-- lang is substituted per request in hooks (§8.5): the document has to be
-     labelled in the language it was actually rendered in, for screen readers
-     and for hyphenation. -->
-<html lang="%zembil.lang%">
+<!-- lang and data-theme are substituted per request in hooks (§8.5, §10.1):
+     the document has to be labelled in the language it was actually rendered
+     in, for screen readers and for hyphenation — and painted in the member's
+     theme from the FIRST frame, which is only possible from a value the server
+     holds. `auto` is a real value here rather than a missing attribute; the
+     token blocks in app.css match it explicitly. -->
+<html lang="%zembil.lang%" data-theme="%zembil.theme%">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />

@@ -9,6 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import migration001 from './migrations/001_initial.sql?raw';
 import migration002 from './migrations/002_claims_visibility_locale_push.sql?raw';
 import migration003 from './migrations/003_private_name_scope.sql?raw';
+import migration004 from './migrations/004_user_theme.sql?raw';
 
 export interface Migration {
 	/** Target `user_version` after this migration applies. 1-based, contiguous. */
@@ -21,7 +22,8 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
 	{ version: 1, name: '001_initial', sql: migration001 },
 	{ version: 2, name: '002_claims_visibility_locale_push', sql: migration002 },
-	{ version: 3, name: '003_private_name_scope', sql: migration003 }
+	{ version: 3, name: '003_private_name_scope', sql: migration003 },
+	{ version: 4, name: '004_user_theme', sql: migration004 }
 ]);
 
 export const LATEST_VERSION = MIGRATIONS.reduce((max, m) => Math.max(max, m.version), 0);

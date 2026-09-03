@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { tx } from '../db/index.js';
-import { conflict, notFound, validationFailed, type DomainError } from './errors.js';
+import { conflict, forbidden, notFound, validationFailed, type DomainError } from './errors.js';
 import { emitStoreChanged, emitStoresChanged } from '../realtime/bus.js';
 import { discardStoreNotifications, noteStoreActivity } from '../notify/index.js';
 import {
@@ -29,6 +29,17 @@ import type { StoreColor, StoreSummary } from '$lib/types';
 
 export interface Actor {
 	id: string;
+	/**
+	 * Taken from `locals.user.isAdmin` by `actorOf`, and from nowhere else.
+	 *
+	 * Optional so that a caller which does not know — a test constructing an
+	 * actor by hand, a script — is treated as a plain member. Absent means NOT an
+	 * admin, which is the direction a missing authorization input has to fail in.
+	 *
+	 * It grants exactly one thing (§8.4a: changing a store's visibility) and is
+	 * NOT an input to `isVisibleTo`: an admin still cannot see a private store.
+	 */
+	isAdmin?: boolean;
 }
 
 const now = () => Date.now();
@@ -58,6 +69,9 @@ export interface VisibleStore {
 	rev: number;
 	archivedAt: number | null;
 	privateTo: string | null;
+	/** `stores.created_by`. Null only when the creating account was deleted
+	 *  (`ON DELETE SET NULL`), and a null creator matches nobody. */
+	createdBy: string | null;
 }
 
 /** THE predicate. Both readers of `private_to` — this module and the item
@@ -72,9 +86,15 @@ export function isVisibleTo(privateTo: string | null | undefined, actorId: strin
  *  whichever 404 code their endpoint owes (§8.4's table). */
 function loadVisibleStore(db: Db, storeId: string, actorId: string): VisibleStore | null {
 	const row = db
-		.prepare('SELECT id, rev, archived_at, private_to FROM stores WHERE id = ?')
+		.prepare('SELECT id, rev, archived_at, private_to, created_by FROM stores WHERE id = ?')
 		.get(storeId) as
-		| { id: string; rev: number; archived_at: number | null; private_to: string | null }
+		| {
+				id: string;
+				rev: number;
+				archived_at: number | null;
+				private_to: string | null;
+				created_by: string | null;
+		  }
 		| undefined;
 	if (!row) return null;
 	if (!isVisibleTo(row.private_to, actorId)) return null;
@@ -82,7 +102,8 @@ function loadVisibleStore(db: Db, storeId: string, actorId: string): VisibleStor
 		id: row.id,
 		rev: Number(row.rev),
 		archivedAt: row.archived_at ?? null,
-		privateTo: row.private_to ?? null
+		privateTo: row.private_to ?? null,
+		createdBy: row.created_by ?? null
 	};
 }
 
@@ -124,20 +145,46 @@ export function requireWritableStore(db: Db, storeId: string, actorId: string): 
 	return store;
 }
 
+/**
+ * §8.4a — WHO may change a store's visibility.
+ *
+ * Visibility is an authorization boundary (§8.4), and until now any member who
+ * could see a shop could privatise it — which meant taking a shared family list
+ * away from everyone else, permanently and with no way back for them, in one
+ * tap. Seeing a list and deciding who else may see it are different powers.
+ *
+ * Two principals hold the second one:
+ *
+ *   - the member who created the store (`stores.created_by`), and
+ *   - an admin.
+ *
+ * This is the ONLY thing `Actor.isAdmin` grants in this module. It is
+ * deliberately not an input to `isVisibleTo`: D-040 stands, an admin still
+ * cannot see, list, or learn of somebody else's private shop — and so, in
+ * practice, this only ever lets an admin act on a store they can already see.
+ *
+ * A store whose creator's account was deleted has `created_by IS NULL`, which
+ * matches no actor id: the shop is then admin-only, not everybody's.
+ */
+export function mayChangeVisibility(store: VisibleStore, actor: Actor): boolean {
+	return actor.isAdmin === true || (store.createdBy !== null && store.createdBy === actor.id);
+}
+
 /** §3.4 / §8.4: `?includeArchived=true` additionally returns archived stores;
  *  a store private to somebody else is absent from the array either way. */
-export function listStores(db: Db, actorId: string, includeArchived = false): StoreSummary[] {
+export function listStores(db: Db, actor: Actor, includeArchived = false): StoreSummary[] {
+	const actorId = actor.id;
 	const visible = '(s.private_to IS NULL OR s.private_to = ?)';
 	const sql = includeArchived
 		? `${STORE_SUMMARY_SELECT} WHERE ${visible} ORDER BY s.sort_order ASC, s.name ASC, s.id ASC`
 		: `${STORE_SUMMARY_SELECT} WHERE ${visible} AND s.archived_at IS NULL ORDER BY s.sort_order ASC, s.name ASC, s.id ASC`;
 	const rows = db.prepare(sql).all(actorId) as unknown as StoreSummaryRow[];
-	return rows.map((row) => toStoreSummary(row, actorId));
+	return rows.map((row) => toStoreSummary(row, actor));
 }
 
-export function getStoreSummary(db: Db, storeId: string, actorId: string): StoreSummary {
-	requireVisibleStore(db, storeId, actorId);
-	const store = readStoreSummary(db, storeId, actorId);
+export function getStoreSummary(db: Db, storeId: string, actor: Actor): StoreSummary {
+	requireVisibleStore(db, storeId, actor.id);
+	const store = readStoreSummary(db, storeId, actor);
 	if (!store) throw storeNotFound();
 	return store;
 }
@@ -245,7 +292,7 @@ export function createStore(
 	});
 
 	emitStoresChanged();
-	return getStoreSummary(db, storeId, actor.id);
+	return getStoreSummary(db, storeId, actor);
 }
 
 export interface StorePatch {
@@ -286,6 +333,15 @@ export function updateStore(
 		// §8.4: visibility first, before anything else. R-14: PATCH is never
 		// rejected for an archived store — it is the endpoint that un-archives.
 		const store = requireVisibleStore(db, storeId, actor.id);
+
+		// §8.4a: BEFORE any write, and before the name key is recomputed — the
+		// key is scoped by the owner, so an unguarded visibility change is also a
+		// rename. Inside the transaction, so a refusal unwinds everything this
+		// PATCH had already written: a guard on a write is only observable
+		// through the write it did not perform.
+		if (visibility !== null && !mayChangeVisibility(store, actor)) {
+			throw forbidden('Only the member who created this shop, or an admin, can change who sees it.');
+		}
 
 		// Migration 003 couples the name and the visibility: `name_key` is scoped
 		// by the owner for a private store, so changing EITHER changes the key.
@@ -338,7 +394,7 @@ export function updateStore(
 	emitStoresChanged();
 	emitStoreChanged(storeId, rev);
 	noteStoreActivity(storeId);
-	return getStoreSummary(db, storeId, actor.id);
+	return getStoreSummary(db, storeId, actor);
 }
 
 /** What a delete removed, so the caller can say so and a test can assert it. */

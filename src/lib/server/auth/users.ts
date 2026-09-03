@@ -4,12 +4,13 @@
  * Everything that reads or writes `users` lives here. Routes hold no SQL.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { AdminUser, Locale, Passkey, User } from '$lib/types';
+import type { AdminUser, Locale, Passkey, Theme, User } from '$lib/types';
 import { bool, fromBool, tx, type Db } from '../db/index.js';
 import { DomainError, conflict, notFound } from '../domain/errors.js';
 import { requiredText } from '../domain/validate.js';
-import { DEFAULT_LOCALE } from '$lib/types';
+import { DEFAULT_LOCALE, DEFAULT_THEME } from '$lib/types';
 import { validateLocale } from './locale.js';
+import { validateTheme } from './theme.js';
 import { generateTemporaryPassword, hashPassword, usernameKey } from './password.js';
 
 export interface UserRow {
@@ -25,6 +26,7 @@ export interface UserRow {
 	updated_at: number;
 	disabled_at: number | null;
 	locale: string;
+	theme: string;
 }
 
 export function toUser(row: UserRow): User {
@@ -40,13 +42,18 @@ export function toUser(row: UserRow): User {
 		// validator — it is what keeps a row written before migration 002 (or by
 		// a future column default change) from producing `undefined` in a
 		// response shape the client destructures.
-		locale: (row.locale as Locale) ?? DEFAULT_LOCALE
+		locale: (row.locale as Locale) ?? DEFAULT_LOCALE,
+		// Same reasoning as `locale` above: migration 004's CHECK makes this one
+		// of the eight, so the fallback is not a validator — it keeps a row read
+		// through an older connection from producing `undefined` in a response
+		// the client destructures.
+		theme: (row.theme as Theme) ?? DEFAULT_THEME
 	};
 }
 
 const SELECT_USER = `
   SELECT id, username, username_key, display_name, password_hash, is_admin, is_active,
-         must_change_password, created_at, updated_at, disabled_at, locale
+         must_change_password, created_at, updated_at, disabled_at, locale, theme
     FROM users
 `;
 
@@ -146,6 +153,7 @@ export function listUsers(db: Db): AdminUser[] {
 		.prepare(
 			`SELECT u.id, u.username, u.username_key, u.display_name, u.password_hash, u.is_admin,
 			        u.is_active, u.must_change_password, u.created_at, u.updated_at, u.disabled_at, u.locale,
+			        u.theme,
 			        (SELECT COUNT(*) FROM credentials c WHERE c.user_id = u.id) AS passkey_count,
 			        (SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
 			   FROM users u
@@ -325,6 +333,57 @@ export async function createUser(db: Db, input: CreateUserInput): Promise<Create
 export function setLocale(db: Db, userId: string, locale: Locale): User {
 	db.prepare('UPDATE users SET locale = ?, updated_at = ? WHERE id = ?').run(
 		locale,
+		Date.now(),
+		userId
+	);
+	return toUser(requireUser(db, userId));
+}
+
+/**
+ * `PATCH /api/me`, the theme half. Same contract as `setLocale`: the id is the
+ * caller's own, taken from the session by the route, and there is no parameter
+ * anywhere above this that names another user.
+ *
+ * It bumps nothing and emits nothing — no shopping state changed, and the only
+ * client that cares is the one that made the request. Unlike `locale`, the
+ * server never composes anything from this column; it exists so the value can
+ * reach `<html data-theme>` during SSR and so a second device agrees with the
+ * first.
+ */
+export function setTheme(db: Db, userId: string, theme: Theme): User {
+	db.prepare('UPDATE users SET theme = ?, updated_at = ? WHERE id = ?').run(
+		theme,
+		Date.now(),
+		userId
+	);
+	return toUser(requireUser(db, userId));
+}
+
+/** Both at once, in one statement and one `updated_at`, for a PATCH that
+ *  carries both. Two `UPDATE`s would be two rows' worth of work and two
+ *  timestamps for what the caller sent as one change. */
+export function setPreferences(
+	db: Db,
+	userId: string,
+	prefs: { locale?: Locale; theme?: Theme }
+): User {
+	const sets: string[] = [];
+	const values: Array<string | number> = [];
+	if (prefs.locale !== undefined) {
+		sets.push('locale = ?');
+		values.push(validateLocale(prefs.locale));
+	}
+	if (prefs.theme !== undefined) {
+		sets.push('theme = ?');
+		values.push(validateTheme(prefs.theme));
+	}
+	if (sets.length === 0) {
+		throw new DomainError('VALIDATION_FAILED', 400, 'Nothing to update.');
+	}
+	// The column names are literals from the two branches above and never from
+	// the caller; every VALUE is bound. This is the same shape `patchUser` uses.
+	db.prepare(`UPDATE users SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).run(
+		...values,
 		Date.now(),
 		userId
 	);

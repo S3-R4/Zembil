@@ -371,7 +371,7 @@ describe('R-10 — delete', () => {
 			// Still present as a row — soft, not hard.
 			expect(h.db.prepare('SELECT * FROM items WHERE id = ?').get(gone.item.id)).toBeTruthy();
 
-			const list = getOpenList(h.db, store.id, actor.id);
+			const list = getOpenList(h.db, store.id, actor);
 			expect(list.items.map((i) => i.id)).toEqual([kept.item.id]);
 
 			const result = closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
@@ -489,7 +489,7 @@ describe('reading an archived store', () => {
 		try {
 			add(h, store.id, actor, 'Milk');
 			updateStore(h.db, store.id, { archived: true }, actor);
-			const list = getOpenList(h.db, store.id, actor.id);
+			const list = getOpenList(h.db, store.id, actor);
 			expect(list.items).toHaveLength(1);
 			expect(list.store.archivedAt).toBeTypeOf('number');
 		} finally {
@@ -513,7 +513,7 @@ describe('R-13 — ordering within a list', () => {
 			h.db.prepare('UPDATE items SET ticked_at = ? WHERE id = ?').run(1000, b.item.id);
 			h.db.prepare('UPDATE items SET ticked_at = ? WHERE id = ?').run(2000, d.item.id);
 
-			const list = getOpenList(h.db, store.id, actor.id);
+			const list = getOpenList(h.db, store.id, actor);
 			expect(list.items.map((i) => i.name)).toEqual(['A', 'C', 'D', 'B']);
 			expect(list.items.map((i) => i.state)).toEqual(['pending', 'pending', 'ticked', 'ticked']);
 			expect(a.item.sortOrder).toBeLessThan(c.item.sortOrder);
@@ -532,9 +532,9 @@ describe('R-13 — ordering within a list', () => {
 			// Same millisecond: only the id tiebreak can order these.
 			h.db.prepare('UPDATE items SET ticked_at = 5000').run();
 
-			const ids = getOpenList(h.db, store.id, actor.id).items.map((i) => i.id);
+			const ids = getOpenList(h.db, store.id, actor).items.map((i) => i.id);
 			expect(ids).toEqual([...ids].sort());
-			expect(getOpenList(h.db, store.id, actor.id).items.map((i) => i.id)).toEqual(ids);
+			expect(getOpenList(h.db, store.id, actor).items.map((i) => i.id)).toEqual(ids);
 		} finally {
 			h.close();
 		}
@@ -548,7 +548,7 @@ describe('R-13 — ordering within a list', () => {
 			deleteItem(h.db, deleted.item.id, actor);
 			closeTrip(h.db, store.id, { tripId: openTrip(h, store.id) }, actor);
 
-			const list = getOpenList(h.db, store.id, actor.id);
+			const list = getOpenList(h.db, store.id, actor);
 			expect(list.items.map((i) => i.state)).toEqual(['pending']);
 			expect(list.items.map((i) => i.id)).not.toContain(carried.item.id);
 			expect(list.items.map((i) => i.id)).not.toContain(deleted.item.id);
@@ -637,8 +637,8 @@ describe('R-14 — archiving a store', () => {
 
 			updateStore(h.db, store.id, { archived: true }, actor);
 
-			expect(listStores(h.db, actor.id).map((s) => s.id)).not.toContain(store.id);
-			const withArchived = listStores(h.db, actor.id, true).find((s) => s.id === store.id);
+			expect(listStores(h.db, actor).map((s) => s.id)).not.toContain(store.id);
+			const withArchived = listStores(h.db, actor, true).find((s) => s.id === store.id);
 			expect(withArchived?.archivedAt).toBeTypeOf('number');
 
 			const trip = h.db.prepare('SELECT * FROM trips WHERE id = ?').get(tripBefore) as any;
@@ -667,7 +667,7 @@ describe('R-14 — archiving a store', () => {
 
 			// Reads are explicitly NOT rejected — rejecting them would make
 			// "un-archiving restores it intact" unreachable from the store's screen.
-			expect(getOpenList(h.db, store.id, actor.id).items).toHaveLength(1);
+			expect(getOpenList(h.db, store.id, actor).items).toHaveLength(1);
 			expect(listClosedTrips(h.db, store.id, actor.id).trips).toEqual([]);
 			expect(getTripDetail(h.db, tripBefore, actor.id).items).toHaveLength(1);
 
@@ -686,7 +686,7 @@ describe('R-14 — archiving a store', () => {
 			updateStore(h.db, store.id, { archived: true }, actor);
 			updateStore(h.db, store.id, { archived: false }, actor);
 
-			const restored = listStores(h.db, actor.id).find((s) => s.id === store.id);
+			const restored = listStores(h.db, actor).find((s) => s.id === store.id);
 			expect(restored).toBeDefined();
 			expect(restored?.archivedAt).toBe(null);
 			expect(restored?.pendingCount).toBe(1);
@@ -739,7 +739,7 @@ describe('R-15 — sort_order allocation', () => {
 
 			const fresh = add(h, store.id, actor, 'C');
 			expect(fresh.item.sortOrder).toBe(3000);
-			expect(getOpenList(h.db, store.id, actor.id).items.map((i) => i.name)).toEqual(['A', 'B', 'C']);
+			expect(getOpenList(h.db, store.id, actor).items.map((i) => i.name)).toEqual(['A', 'B', 'C']);
 		} finally {
 			h.close();
 		}

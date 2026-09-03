@@ -25,6 +25,7 @@ const store = (rev: number): StoreSummary => ({
 	lastClosedTripAt: null,
 	archivedAt: null,
 	visibility: 'public',
+	canChangeVisibility: true,
 	claimedByName: null,
 	claimedByMe: false,
 	claimedAt: null,

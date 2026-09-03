@@ -1279,3 +1279,101 @@ forgotten. Emitting nothing was the other option, and it is worse for the same r
 operator's backup, which is what `scripts/backup.sh` is for and what the README already documents. A
 trash would be a second lifecycle to reason about in every store-scoped query — and the reversible
 option already exists next to this one, with its own button.
+
+---
+
+## D-046 — Changing a shop's visibility belongs to its creator and to admins, not to everyone who can see it
+
+**Status:** accepted (M8). **Contract:** §10.1.
+
+§8.6 shipped `visibility` as a fifth field on `PATCH /api/stores/{id}` alongside `name`, `color`,
+`sortOrder` and `archived`, gated by the same check as the other four: can the caller see the store.
+For four of them that is the right gate. For the fifth it is not, and the asymmetry is worth naming:
+renaming a shop is a change anybody can see and anybody can undo, while privatising one **removes it
+from every other member's world** — and under D-040 the losers cannot even discover where it went,
+let alone bring it back. One tap, by anybody, permanent for everybody else.
+
+So the field now takes a principal: the member named by `stores.created_by`, or an admin.
+
+**Why the creator, when D-045 explicitly refused to give a public store an owner.** These are
+different questions and it is worth being precise, because the two decisions look contradictory.
+D-045 refused an owner for *deletion*, on the grounds that a household of fewer than ten people who
+already share every list should not need to hunt for a specific person to undo their own accident —
+and deletion is symmetric: whoever does it, everybody loses the shop equally, and everybody can see
+that it happened. Privatising is **asymmetric**: one member keeps the shop and the rest cannot tell
+it from a shop that never existed. `created_by` is not being introduced as an ownership concept here;
+it is the only principal in the row who can be relied on to still see the store afterwards.
+
+**Why admins too, when D-040 is emphatic that admins get no visibility exemption.** Because this is
+not a visibility exemption. §8.4 is resolved *first* and unchanged: an admin who cannot see a store
+gets the same byte-identical 404 as anybody else, so the exemption can only ever apply to a store the
+admin can already see — a shared one. What it buys is a way to undo a privatisation that should not
+have happened, on a shop the whole family was using, without a database prompt. What it explicitly
+does not buy is any path into a store private to another member; a test asserts the 404, and it
+asserts it *for the admin*.
+
+**Rejected: a 403 that names the store, or a message explaining who the creator is.** The refusal is
+`403 FORBIDDEN` with no sibling field, and the client's copy says "the member who created this shop,
+or an admin" without naming anybody. §3 keeps user ids off the wire for non-admins, and a display
+name here would be an unrequested directory of who created what.
+
+**Rejected: `createdById` on `StoreSummary`.** The client needs to know whether to draw the control,
+which is a boolean question, so it gets `canChangeVisibility`. Same reasoning and same shape as
+`claimedByMe` (§8.6). The hint is not the control: the server enforces the rule in `updateStore`, in
+one place, and a client that ignores the hint gets the 403.
+
+**The implementation detail that mattered.** The check sits inside the transaction and **before** the
+name key is recomputed, because migration 003 scopes `name_key` by the owner — so a visibility change
+is also a rename, and a guard placed after it would leave a store public with a private key. A body
+carrying `{ name, visibility }` from a caller who may do the first but not the second now writes
+neither, and the test asserts that by reading the row back rather than by reading the status code.
+That is the M6 write-seam lesson applied without having to relearn it.
+
+---
+
+## D-047 — The theme moves from the device to the account, and there are eight of them
+
+**Status:** accepted (M8). **Contract:** §10.2, migration 004.
+
+The Appearance control was Light/Auto/Dark in `localStorage`. It is now eight themes in
+`users.theme`, chosen from a dropdown.
+
+**Why the column, and not a cookie or `localStorage`.** Three reasons, and the third is the one that
+settled it:
+
+1. A per-device value means the same person meets a different app on their phone than on their
+   tablet. Locale was moved to the account in M6 for the same reason (§8.5); this is the same
+   argument about the same person.
+2. A new browser always started on the OS default, which for a member who had deliberately chosen
+   something is a preference that does not survive the thing preferences exist for.
+3. **Only a value the server holds can reach the first frame.** `localStorage` cannot be read during
+   SSR, so the old control was applied on mount and PROJECT.md §13 recorded the resulting flash as a
+   known gap whose "honest fix is a cookie read in the root `load`". A column is that fix without the
+   cookie: `hooks.server.ts` substitutes it into `<html data-theme>` exactly as it already
+   substitutes `%zembil.lang%`. The inline-script alternative is still refused — it cannot get a hash
+   past `kit.csp` (D-026), which is the reason the gap existed.
+
+A cookie would also have worked for (3) and not for (1) or (2), and would have added a second piece
+of client state to reason about beside the session. One column, one source.
+
+**`auto` is a value, not an absent attribute.** The old CSS guarded the dark block on
+`:root:not([data-theme='light'])`, which worked when there were exactly three options. With eight it
+is wrong: `sepia` would be repainted dark after sunset. The guard now names `auto` explicitly, and
+`applyTheme` sets the attribute for every value including `auto`.
+
+**Why a dropdown rather than the segmented row.** Eight labels do not fit across 390px, and a native
+`<select>` gets the platform's own picker — a wheel on iOS, a sheet on Android — which is larger than
+any target we would draw and already knows about VoiceOver. It clears the 44px floor, which the e2e
+suite asserts.
+
+**Why these eight.** Three are the ones that existed (`auto`, `light`, `dark`). Two more are the same
+paper under different light (`sepia`, `sage`) and stay on the light family's store palette, because
+`stores.color` is a *shared* choice — a shop should look like the same shop to everybody looking at
+it. Two are dark (`indigo`, `plum`) and inherit the dark store palette wholesale, grouped in one
+selector list so twenty-four palette tokens are not written out three times and left to drift. The
+eighth, `contrast`, is not a taste option: it is black borders and black text for a phone in direct
+sun, which is the brief's actual operating environment.
+
+**What is not built:** a custom colour picker, a per-store theme, an accent-only override, or a
+scheduled day/night switch. `auto` already tracks the OS's own schedule, which is where a member has
+configured that once for every app they own.

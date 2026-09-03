@@ -479,7 +479,7 @@ function finishClaim(
 	}
 	const trip = db.prepare(`${TRIP_SELECT} WHERE t.id = ?`).get(result.tripId) as unknown as TripRow;
 	return {
-		store: getStoreSummary(db, storeId, actor.id),
+		store: getStoreSummary(db, storeId, actor),
 		trip: toTrip(trip, actor.id),
 		changed: result.changed,
 		rev: result.rev

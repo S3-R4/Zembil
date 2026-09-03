@@ -128,10 +128,11 @@ export interface ListResponse {
 }
 
 /** `GET /api/stores/{storeId}/list` — §3.5. Never includes deleted or carried items. */
-export function getOpenList(db: Db, storeId: string, actorId: string): ListResponse {
+export function getOpenList(db: Db, storeId: string, actor: Actor): ListResponse {
+	const actorId = actor.id;
 	// §8.4: getStoreSummary resolves visibility first and 404s identically to a
 	// store id that never existed.
-	const store = getStoreSummary(db, storeId, actorId);
+	const store = getStoreSummary(db, storeId, actor);
 	const tripRow = db
 		.prepare(`${TRIP_SELECT} WHERE t.store_id = ? AND t.status = 'open'`)
 		.get(storeId) as unknown as TripRow | undefined;

@@ -132,7 +132,8 @@ export function localsFor(
 					isActive: true,
 					mustChangePassword: false,
 					createdAt: Date.now(),
-					locale: 'en' as const
+					locale: 'en' as const,
+					theme: 'auto' as const
 				}
 			: null,
 		sessionId: user ? sessionId : null

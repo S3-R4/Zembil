@@ -16,7 +16,7 @@ describe('migration runner', () => {
 		const h = harness();
 		try {
 			expect(getUserVersion(h.db)).toBe(LATEST_VERSION);
-			expect(LATEST_VERSION).toBe(3);
+			expect(LATEST_VERSION).toBe(4);
 			const tables = (
 				h.db
 					.prepare(`SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`)

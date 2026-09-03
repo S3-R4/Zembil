@@ -15,6 +15,7 @@ import type { AuthConfig } from './config.js';
 import { clearSessionCookie, readSessionCookie, refreshSessionCookie } from './cookies.js';
 import { resolveSession } from './session.js';
 import { negotiateAcceptLanguage } from './locale.js';
+import { DEFAULT_THEME } from '$lib/types';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -177,8 +178,26 @@ export function createHandle(db: Db, config: AuthConfig): Handle {
 			? event.locals.user.locale
 			: negotiateAcceptLanguage(event.request.headers.get('accept-language'));
 
+		// The same argument, for the same reason, about how the document LOOKS.
+		// The theme used to be read from `localStorage` after mount, so a member
+		// who had overridden their OS setting saw one frame of the other theme on
+		// every cold load — PROJECT.md §13's "theme flash". A column can be read
+		// here, before the shell is written, and an inline script (the other
+		// obvious fix) cannot get a hash past `kit.csp`.
+		//
+		// Signed out there is no member and no column, so the sign-in screen gets
+		// `auto` and follows the device. There is no header to negotiate against:
+		// `prefers-color-scheme` is a CSS media feature, not a request header, and
+		// `auto` already honours it in the stylesheet.
+		//
+		// Both values are closed sets — three locales, eight themes, each fixed by
+		// a CHECK constraint and re-validated at every write — so neither can put
+		// caller-controlled text into the markup.
+		const theme = event.locals.user ? event.locals.user.theme : DEFAULT_THEME;
+
 		const response = await resolve(event, {
-			transformPageChunk: ({ html }) => html.replace('%zembil.lang%', lang)
+			transformPageChunk: ({ html }) =>
+				html.replace('%zembil.lang%', lang).replace('%zembil.theme%', theme)
 		});
 
 		return applySecurityHeaders(response, authenticated);

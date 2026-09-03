@@ -10,7 +10,7 @@ export const GET: RequestHandler = async ({ locals, url }) =>
 		// to somebody else is absent from the array.
 		const actor = actorOf(locals);
 		const includeArchived = url.searchParams.get('includeArchived') === 'true';
-		return ok({ stores: listStores(getDb(), actor.id, includeArchived) });
+		return ok({ stores: listStores(getDb(), actor, includeArchived) });
 	});
 
 export const POST: RequestHandler = async ({ locals, request }) =>

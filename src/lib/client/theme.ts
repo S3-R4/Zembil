@@ -1,42 +1,36 @@
 /**
- * Appearance — Light / Auto / Dark, per docs/DESIGN.md §4 (Account screen).
+ * Theme — the client half of a preference the SERVER owns.
  *
- * Stored per browser in localStorage, because it is a per-device preference:
- * the phone in a dark kitchen and the tablet on a sunlit counter should not
- * have to agree, and it is not worth a column and a round trip.
+ * `users.theme` (migration 004) is the single source. `hooks.server.ts`
+ * substitutes it into `<html data-theme>` before the document leaves the
+ * process, so the first paint is already correct and there is nothing here to
+ * do on a cold load. This module exists for the other case: changing the theme
+ * inside the app is a client-side navigation, which re-runs `load` and
+ * re-renders the body while leaving `<html>` exactly as it was served — the
+ * same asymmetry that `document.documentElement.lang` has to be fixed up for.
+ *
+ * It replaces the old `localStorage` appearance, which is gone on purpose. A
+ * per-device value could not be read during SSR, which is what made the theme
+ * flash (PROJECT.md §13), and it meant a member's phone and tablet disagreed
+ * about what their own app looks like.
  */
-export type Appearance = 'light' | 'auto' | 'dark';
-
-const KEY = 'zembil:appearance';
-
-export function readAppearance(): Appearance {
-	if (typeof localStorage === 'undefined') return 'auto';
-	try {
-		const raw = localStorage.getItem(KEY);
-		return raw === 'light' || raw === 'dark' ? raw : 'auto';
-	} catch {
-		// Private mode, or site data blocked. Auto is the honest default.
-		return 'auto';
-	}
-}
+import { DEFAULT_THEME, THEMES, type Theme } from '$lib/types';
 
 /**
- * 'auto' REMOVES the attribute rather than setting it to anything. The token
- * blocks in app.css are written as `:root:not([data-theme="light"])` under
- * `prefers-color-scheme: dark`, so the absence of the attribute is what lets
- * the OS decide.
+ * `auto` is SET, not removed. The token blocks in `app.css` match
+ * `:root[data-theme='auto']` alongside `:root:not([data-theme])`, because with
+ * eight themes the absence of the attribute can no longer stand in for "follow
+ * the OS" — it has to mean it explicitly, or `sepia` would be repainted dark by
+ * the `prefers-color-scheme` block.
  */
-export function applyAppearance(value: Appearance): void {
-	const root = document.documentElement;
-	if (value === 'auto') root.removeAttribute('data-theme');
-	else root.setAttribute('data-theme', value);
+export function applyTheme(value: Theme): void {
+	document.documentElement.setAttribute('data-theme', value);
 }
 
-export function saveAppearance(value: Appearance): void {
-	applyAppearance(value);
-	try {
-		localStorage.setItem(KEY, value);
-	} catch {
-		/* nothing to do; the choice lasts for this page */
-	}
+/** For a value arriving from outside the type system — page data deserialised
+ *  from the server, or a column read through an older connection. */
+export function asTheme(value: unknown): Theme {
+	return typeof value === 'string' && (THEMES as readonly string[]).includes(value)
+		? (value as Theme)
+		: DEFAULT_THEME;
 }

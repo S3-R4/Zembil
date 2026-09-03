@@ -488,19 +488,41 @@ describe('§8.6 — visibility is a property of the store, not a one-way door', 
 		}
 	});
 
-	test('privatising is scoped to the caller: a second member cannot claim it by patching', async () => {
+	test('privatising is scoped to the caller — but only a principal §8.4a allows can do it', async () => {
 		const w = await world();
 		try {
-			// `other` privatises the shared store, which §8.6 permits — any member
-			// may privatise any store they can see.
-			await call(storeRoute.PATCH, {
+			// §8.4a: `other` can SEE the shared store but did not create it and is
+			// not an admin, so it cannot decide who else sees it. Before §8.4a this
+			// call succeeded and took the shop away from its creator in one tap.
+			const refused = await call(storeRoute.PATCH, {
 				locals: w.otherLocals,
 				params: { storeId: w.store.id },
 				request: jsonRequest({ visibility: 'private' }, 'PATCH')
 			});
-			// It now belongs to `other`, so the ORIGINAL creator loses it too.
-			// That is the documented cost of D-040, and it is asserted rather than
-			// assumed so nobody "fixes" it into a creator exemption by accident.
+			expect(refused.status).toBe(403);
+			// The write seam, not the status code: the row is what proves nothing
+			// happened (PROJECT.md §11).
+			expect(
+				(w.h.db.prepare('SELECT private_to FROM stores WHERE id = ?').get(w.store.id) as any)
+					.private_to
+			).toBe(null);
+			expect(
+				(await call(listRoute.GET, { locals: w.ownerLocals, params: { storeId: w.store.id } }))
+					.status
+			).toBe(200);
+
+			// The ADMIN may, and when it does the store becomes private to the
+			// admin — 'private' has always meant "private to the caller" (§8.6),
+			// and D-040 still applies to the result: the creator loses it. That is
+			// asserted rather than assumed so nobody "fixes" it into a creator
+			// exemption by accident.
+			const allowed = await call(storeRoute.PATCH, {
+				locals: w.adminLocals,
+				params: { storeId: w.store.id },
+				request: jsonRequest({ visibility: 'private' }, 'PATCH')
+			});
+			expect(allowed.status).toBe(200);
+
 			const res = await call(listRoute.GET, {
 				locals: w.ownerLocals,
 				params: { storeId: w.store.id }
@@ -508,7 +530,7 @@ describe('§8.6 — visibility is a property of the store, not a one-way door', 
 			expect(res.status).toBe(404);
 
 			const theirs = await call(listRoute.GET, {
-				locals: w.otherLocals,
+				locals: w.adminLocals,
 				params: { storeId: w.store.id }
 			});
 			expect(theirs.status).toBe(200);

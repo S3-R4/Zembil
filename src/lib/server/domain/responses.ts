@@ -38,7 +38,10 @@ export function unauthenticated(): Response {
 export function actorOf(locals: App.Locals): Actor {
 	const user = locals.user;
 	if (!user) throw new DomainError('UNAUTHENTICATED', 401, 'Please sign in.');
-	return { id: user.id };
+	// §8.4a: `isAdmin` comes from the session's user row and from nothing else —
+	// never a body, never a query parameter, either of which would let a caller
+	// name their own privilege.
+	return { id: user.id, isAdmin: user.isAdmin };
 }
 
 export async function readJson(request: Request): Promise<Record<string, unknown>> {

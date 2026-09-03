@@ -107,8 +107,14 @@
 	--c-slate-fg: #414752;
 }
 
+/* `auto` — and a document that has not been given an attribute at all, which
+ * only happens for a page rendered outside the app shell — follow the OS. Every
+ * other theme is an explicit choice and must survive an OS in dark mode, so the
+ * guard names `auto` rather than excluding `light`: with eight themes, "not
+ * light" would repaint `sepia`, `sage` and `contrast` dark after sunset. */
 @media (prefers-color-scheme: dark) {
-	:root:not([data-theme='light']) {
+	:root:not([data-theme]),
+	:root[data-theme='auto'] {
 		--bg: #0f0d0b;
 		--surface: #191613;
 		--surface-sunk: #161311;
@@ -157,7 +163,13 @@
 	}
 }
 
-:root[data-theme='dark'] {
+/* The dark family. `indigo` and `plum` inherit this whole block — the store
+ * palette especially, which has to be the dark one on any dark ground — and
+ * then override the neutrals and the accent below. Grouping is what keeps
+ * twenty-four palette tokens from being written out three times and drifting. */
+:root[data-theme='dark'],
+:root[data-theme='indigo'],
+:root[data-theme='plum'] {
 	--bg: #0f0d0b;
 	--surface: #191613;
 	--surface-sunk: #161311;
@@ -203,6 +215,160 @@
 	--c-slate: #9aa2ae;
 	--c-slate-bg: #1e2024;
 	--c-slate-fg: #d7dbe1;
+}
+
+/* ---------------------------------------------------------------------------
+ * The rest of the themes.
+ *
+ * Each one redefines only what changes. The light family sits on `:root`'s
+ * tokens and leaves the eight store colours alone: `stores.color` is a shared,
+ * per-store choice that the whole family sees, so it should look like the same
+ * shop whichever theme a member is reading it in. The dark family inherits the
+ * grouped block above, palette included.
+ *
+ * Every block has the same specificity — `:root` plus one attribute — so order
+ * decides, and each theme's own block comes after the group it inherits from.
+ * ------------------------------------------------------------------------ */
+
+/* Linen — the warm end of the paper. Deeper cream, brown ink, no white. */
+:root[data-theme='sepia'] {
+	--bg: #f0e6d4;
+	--surface: #fbf3e3;
+	--surface-sunk: #f2e8d5;
+	--surface-muted: #e9dcc3;
+	--border: #ddcdb0;
+	--border-strong: #d2c09f;
+	--border-dashed: #c6b28e;
+	--rule: #dccfb5;
+	--text: #2a1f12;
+	--text-2: #4a3a26;
+	--text-3: #7a6647;
+	--text-muted: #8f7c5c;
+	--text-faint: #a08d6d;
+	--text-disabled: #c2b294;
+	--accent: #9c5a1f;
+	--accent-deep: #7a4415;
+	--accent-tint: #f0dcc2;
+	--on-accent: #fdf6e8;
+	--danger: #7d2a1c;
+	--shadow-sheet: 0 -18px 48px rgb(42 31 18 / 14%);
+}
+
+/* Olive — the same paper under a green light. The one light theme whose accent
+ * is not a terracotta, so the primary button reads differently from the shop
+ * spine beside it, which is the point of offering it. */
+:root[data-theme='sage'] {
+	--bg: #eef0e6;
+	--surface: #fafcf4;
+	--surface-sunk: #eff2e6;
+	--surface-muted: #e3e8d6;
+	--border: #d7ddc7;
+	--border-strong: #c9d1b6;
+	--border-dashed: #bcc5a6;
+	--rule: #dbe0cd;
+	--text: #171c13;
+	--text-2: #333a2b;
+	--text-3: #5f6a53;
+	--text-muted: #7b8570;
+	--text-faint: #8d9682;
+	--text-disabled: #b3bba7;
+	--accent: #47713f;
+	--accent-deep: #2f5230;
+	--accent-tint: #dfeade;
+	--on-accent: #fafcf4;
+	--danger: #8a2f22;
+	--shadow-sheet: 0 -18px 48px rgb(23 28 19 / 12%);
+}
+
+/* High contrast — for a phone in direct sun, and for anyone the muted greys
+ * are not working for. Borders become black rather than a tint, so the row
+ * separators survive a screen at full brightness; `--text-disabled` stays
+ * genuinely dimmer, because a disabled control that looks live is worse than a
+ * faint one. */
+:root[data-theme='contrast'] {
+	--bg: #ffffff;
+	--surface: #ffffff;
+	--surface-sunk: #f0f0f0;
+	--surface-muted: #e4e4e4;
+	--border: #1a1a1a;
+	--border-strong: #000000;
+	--border-dashed: #444444;
+	--rule: #1a1a1a;
+	--text: #000000;
+	--text-2: #111111;
+	--text-3: #262626;
+	--text-muted: #333333;
+	--text-faint: #444444;
+	--text-disabled: #6b6b6b;
+	--accent: #8a3c12;
+	--accent-deep: #5e2708;
+	--accent-tint: #ffe6d5;
+	--on-accent: #ffffff;
+	--danger: #8a0f0f;
+	--shadow-sheet: 0 -18px 48px rgb(0 0 0 / 35%);
+}
+
+/* Indigo — dark, cool. Inherits the dark store palette above. */
+:root[data-theme='indigo'] {
+	--bg: #0b0f1a;
+	--surface: #151b2b;
+	--surface-sunk: #111624;
+	--surface-muted: #1e2740;
+	--border: #232c44;
+	--border-strong: #2e3953;
+	--border-dashed: #35405c;
+	--rule: #1e2740;
+	--text: #e6ecf8;
+	--text-2: #ccd6ea;
+	--text-3: #94a1bd;
+	--text-muted: #7d8aa6;
+	--text-faint: #66728c;
+	--text-disabled: #46506a;
+	--accent: #7fa9e8;
+	--accent-deep: #a8c6f2;
+	--accent-tint: #1a2540;
+	--on-accent: #0b0f1a;
+	--danger: #e08a7e;
+	--shadow-sheet: 0 -18px 48px rgb(0 0 0 / 55%);
+}
+
+/* Mulberry — dark, warm. Inherits the dark store palette above. */
+:root[data-theme='plum'] {
+	--bg: #150e14;
+	--surface: #201620;
+	--surface-sunk: #1b131b;
+	--surface-muted: #2c1f2c;
+	--border: #332433;
+	--border-strong: #3f2d3f;
+	--border-dashed: #4a344a;
+	--rule: #2c1f2c;
+	--text: #f3e7f0;
+	--text-2: #dccbd8;
+	--text-3: #a893a4;
+	--text-muted: #8e7b8b;
+	--text-faint: #746474;
+	--text-disabled: #524652;
+	--accent: #d98fb4;
+	--accent-deep: #edb6d0;
+	--accent-tint: #331f2b;
+	--on-accent: #171016;
+	--danger: #e08a7e;
+	--shadow-sheet: 0 -18px 48px rgb(0 0 0 / 55%);
+}
+
+/* Tells form controls, scrollbars and the caret which way round each theme is.
+ * `auto` keeps `light dark` from the `html` rule below and lets the OS pick. */
+:root[data-theme='light'],
+:root[data-theme='sepia'],
+:root[data-theme='sage'],
+:root[data-theme='contrast'] {
+	color-scheme: light;
+}
+
+:root[data-theme='dark'],
+:root[data-theme='indigo'],
+:root[data-theme='plum'] {
+	color-scheme: dark;
 }
 
 /* ---------------------------------------------------------------------------

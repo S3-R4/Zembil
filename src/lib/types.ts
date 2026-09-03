@@ -23,6 +23,44 @@ export const LOCALES: readonly Locale[] = Object.freeze(['en', 'tr', 'de']);
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
+/**
+ * The interface theme, stored per USER (`users.theme`) rather than per device.
+ *
+ * `auto` follows the operating system and is the default; every other value is
+ * an explicit choice that wins over it in both directions. The value is a KEY
+ * into the token blocks in `app.css`, never a colour — same rule as
+ * `stores.color` (D-017).
+ *
+ * Per user rather than per device (this replaces the old `localStorage`
+ * appearance) for two reasons: a member's phone and tablet should not disagree
+ * about what their app looks like, and only a value the SERVER holds can reach
+ * `<html data-theme>` before the first paint. The previous device-local
+ * arrangement is what PROJECT.md §13 listed as the theme-flash gap.
+ */
+export type Theme =
+	| 'auto'
+	| 'light'
+	| 'dark'
+	| 'sepia'
+	| 'sage'
+	| 'contrast'
+	| 'indigo'
+	| 'plum';
+
+/** Picker order: the three that existed first, then light-family, then dark. */
+export const THEMES: readonly Theme[] = Object.freeze([
+	'auto',
+	'light',
+	'dark',
+	'sepia',
+	'sage',
+	'contrast',
+	'indigo',
+	'plum'
+]);
+
+export const DEFAULT_THEME: Theme = 'auto';
+
 export interface User {
 	id: string;
 	username: string;
@@ -32,6 +70,7 @@ export interface User {
 	mustChangePassword: boolean;
 	createdAt: number;
 	locale: Locale;
+	theme: Theme;
 }
 
 /** Admin listing only — never sent to a non-admin. */
@@ -94,6 +133,16 @@ export interface StoreSummary extends Claim {
 	lastClosedTripAt: number | null;
 	archivedAt: number | null; // non-null only in the ?includeArchived=true listing
 	visibility: StoreVisibility;
+	/**
+	 * Whether THIS caller may change `visibility` — true for the member who
+	 * created the shop and for any admin, false for everybody else. Computed per
+	 * request from the session, never a column, and deliberately a boolean rather
+	 * than the creator's id: §3 keeps user ids off the wire for non-admins.
+	 *
+	 * The server enforces the same rule in `updateStore`; this only lets the
+	 * interface stop offering a control that would 403.
+	 */
+	canChangeVisibility: boolean;
 }
 
 export type TripStatus = 'open' | 'closed';

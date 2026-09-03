@@ -584,32 +584,42 @@
 		</button>
 	</form>
 
+	<!--
+	  §8.4a. The buttons are here only for the member who created the shop and
+	  for an admin; everybody else sees the current setting as a sentence and no
+	  control. The server refuses the PATCH either way (`403 FORBIDDEN`) — this
+	  is what keeps the interface from offering a tap that cannot work.
+	-->
 	<section class="visibility">
 		<h3 class="z-card-title">{m.storeVisibility}</h3>
-		<div class="segmented" role="group" aria-label={m.storeVisibility}>
-			<button
-				type="button"
-				class:on={store?.visibility === 'public'}
-				aria-pressed={store?.visibility === 'public'}
-				disabled={settingsBusy}
-				onclick={() => setVisibility('public')}
-			>
-				{m.storeVisibilityPublic}
-			</button>
-			<button
-				type="button"
-				class:on={store?.visibility === 'private'}
-				aria-pressed={store?.visibility === 'private'}
-				disabled={settingsBusy}
-				onclick={() => setVisibility('private')}
-			>
-				{m.storeVisibilityPrivate}
-			</button>
-		</div>
+		{#if store?.canChangeVisibility}
+			<div class="segmented" role="group" aria-label={m.storeVisibility}>
+				<button
+					type="button"
+					class:on={store?.visibility === 'public'}
+					aria-pressed={store?.visibility === 'public'}
+					disabled={settingsBusy}
+					onclick={() => setVisibility('public')}
+				>
+					{m.storeVisibilityPublic}
+				</button>
+				<button
+					type="button"
+					class:on={store?.visibility === 'private'}
+					aria-pressed={store?.visibility === 'private'}
+					disabled={settingsBusy}
+					onclick={() => setVisibility('private')}
+				>
+					{m.storeVisibilityPrivate}
+				</button>
+			</div>
+		{/if}
 		<p class="z-meta faint">
-			{store?.visibility === 'private'
-				? m.storeVisibilityPrivateHelp
-				: m.storeVisibilityPublicHelp}
+			{store?.canChangeVisibility
+				? store?.visibility === 'private'
+					? m.storeVisibilityPrivateHelp
+					: m.storeVisibilityPublicHelp
+				: m.storeVisibilityLocked}
 		</p>
 	</section>
 

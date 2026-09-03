@@ -169,8 +169,12 @@ until someone tries to sign in.
 
 A shop is **public** by default: every signed-in member sees it, its list and its history.
 
-Any member can switch a shop to **private** from the shop's edit sheet, and it then belongs to them
-alone. Private means private: nobody else can open it, list it, add to it, or find out that it
+The member who **created** a shop — and any admin — can switch it to **private** from the shop's edit
+sheet, and it then belongs to whoever made the change. Nobody else is offered the control, and the
+server refuses the change if they send it anyway: privatising a shared shop removes it from everyone
+else's app permanently, so it is not a tap any passer-by should have.
+
+Private means private: nobody else can open it, list it, add to it, or find out that it
 exists. **This includes admins.** An admin who fetches the shop list does not see it, and asking for
 it by id returns the same "not found" as an id that was never real.
 
@@ -178,7 +182,8 @@ That is the point of the feature, and it has one operational consequence worth k
 somebody uses it:
 
 > If a member makes a **shared** shop private and then stops using the app, no admin can undo it from
-> inside Zembil. There is no override, deliberately.
+> inside Zembil. There is no override, deliberately — an admin can only change the visibility of a
+> shop they can still *see*, and a private one is invisible to them like everyone else.
 
 Recovery is one statement against the database:
 
@@ -289,6 +294,21 @@ is not the person who triggered them, so they cannot be translated by the phone 
 
 New accounts start in whichever of the three the creating browser asked for via `Accept-Language`,
 falling back to English.
+
+---
+
+## Themes
+
+The account screen has a **Theme** dropdown with eight options: *Follow my device*, *Paper*, *Night*,
+*Linen*, *Olive*, *High contrast*, *Indigo* and *Mulberry*. *Follow my device* is the default and
+tracks the phone's own light/dark setting.
+
+Like the language, it is a property of the **person, not the device** — sign in on the tablet and it
+looks the same as the phone. It is also applied by the server before the page is drawn, so there is
+no flash of the previous theme on a cold open.
+
+*High contrast* is worth knowing about if somebody is reading the list in direct sun: black text and
+black rules rather than the warm greys the other light themes use.
 
 ---
 

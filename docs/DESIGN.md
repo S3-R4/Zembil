@@ -10,9 +10,20 @@ Aesthetic: warm woven paper, terracotta accent, **everything primary in the bott
 
 ## 1. Colour tokens
 
-Defined as CSS custom properties on `:root`, overridden under `[data-theme="dark"]` and under
-`@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme="light"])` so the Appearance
-control (Light / Auto / Dark) wins in both directions.
+Defined as CSS custom properties on `:root`, overridden under `[data-theme="…"]` and under
+`@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme]), :root[data-theme="auto"]`
+so the Theme control wins in both directions.
+
+**M8: eight themes, and `auto` is a value.** `auto`, `light`, `dark`, `sepia`, `sage`, `contrast`,
+`indigo`, `plum` — stored in `users.theme` and written onto `<html>` by the server before the first
+paint (CONTRACT.md §10.2). The guard names `auto` explicitly rather than excluding `light`, because
+with eight themes "no attribute" can no longer stand in for "follow the OS": under the old
+`:not([data-theme="light"])` guard, `sepia` would be repainted dark after sunset.
+
+`sepia`, `sage` and `contrast` sit on `:root`'s light tokens and leave the eight **store** colours
+alone — `stores.color` is a shared choice, and a shop should look like the same shop to everybody.
+`indigo` and `plum` are grouped into the `[data-theme="dark"]` selector list, inheriting the dark
+store palette wholesale, and then override the neutrals and the accent.
 
 ### Light
 
@@ -107,7 +118,8 @@ in `system-ui, sans-serif`.
 | Store spine | 56px × 8px | 4px | store palette colour |
 | Checkbox | 24–26px | 8px | 2.5px border |
 | Claim strip | auto (≥44px control) | 18px | M6. `--surface-muted`; sits under the list header, above the items |
-| Segmented control | 44px per button | 16px outer / 12px inner | M6. Appearance, Language, and Who-can-see-this-shop all use it |
+| Segmented control | 44px per button | 16px outer / 12px inner | M6. Language, and Who-can-see-this-shop, use it. M8: Appearance became the Theme dropdown |
+| Theme dropdown | 60px (`.z-field`) | 16px | M8. A native `<select>`: eight labels do not fit across 390px, and the platform picker beats anything we would draw |
 | Colour swatch | 44px | 14px | M6. A swatch is a tap target like any other — not the 24px dot it looks like |
 | Settings gear | 44px | 14px | M6. List header, right-aligned, `--text-2` |
 
@@ -130,7 +142,7 @@ is 24px and the target around it is 44px.
 | Item detail | sheet | Item, Quantity or note, Store, Delete, Save |
 | Finish trip | confirm sheet | Bought / Left on the list / Keep shopping |
 | Trips | `/trips` | history; "See 8 items"; per-trip item preview |
-| Account | `/you` | passkeys with "Used 2 minutes ago" + Remove; Notifications; Language; Appearance Light/Auto/Dark; Sign out |
+| Account | `/you` | passkeys with "Used 2 minutes ago" + Remove; Notifications; Language; Theme (M8: a dropdown of eight, saved to the account); Sign out |
 | Admin | `/you/admin` | "Active · 2 passkeys", "Active · password only", "Disabled 4 Aug" + Enable; New user; Reset password; Remove all passkeys; Disable user |
 
 ### Added in M6
@@ -139,7 +151,7 @@ is 24px and the target around it is 44px.
 |---|---|---|
 | Claim strip | on `/s/{storeId}` | "Nobody is going yet." / "Ayşe is shopping here." + her note; the action is "I'm going to this shop", "Change my note" or "Take over". Status first, control second — the common case is reading it |
 | Claim | sheet over list | one optional note, 140 chars, live countdown. After a `409 TRIP_CLAIMED` the same sheet becomes "Take over anyway" and names who is already going |
-| Shop settings | sheet over list | rename, recolour, **Who can see this shop** (Everyone / Only me), archive, delete. Opened from the gear in the list header |
+| Shop settings | sheet over list | rename, recolour, **Who can see this shop** (Everyone / Only me), archive, delete. Opened from the gear in the list header. M8: the Everyone/Only me pair is drawn only for the shop's creator and for admins (CONTRACT.md §10.1); everybody else gets the sentence and no control |
 | Archived shops | sheet over Shops | the only route to an archived store's id, so the only way R-14's un-archive promise is reachable |
 | Notifications | section on `/you` | on/off for this device, device count, and the reason it cannot be turned on when it cannot — permission denied, unsupported, or iOS-needs-Home-Screen |
 | Language | section on `/you` | English / Türkçe / Deutsch, each named in itself |

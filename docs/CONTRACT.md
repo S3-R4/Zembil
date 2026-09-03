@@ -1849,3 +1849,51 @@ still no parameter naming a user, at any privilege level.
 
 **`User` gains `theme: Theme`** (§7 delta), carried by `GET /api/me`, by `locals.user`, and by the
 root `load`.
+
+---
+
+## 11. Addendum 5 — versioning (M8, no schema change)
+
+### 11.1 The version is shown to members, and to nobody else
+
+`src/lib/version.ts` holds `VERSION` (`0.<milestone>.<patch>`) and `RELEASED_ON` (`YYYY-MM-DD`, UTC).
+`package.json`'s `version`, the top heading of `docs/VERSIONS.md` and PROJECT.md §2 carry the same
+value, and a test asserts the first two agree with the module.
+
+**Where it appears.** The foot of `/you`, as one line: `Zembil v0.8 · as of 3 September 2026`. It is
+rendered from `users.locale` like every other string on that screen, and the patch segment is dropped
+when it is zero — `v0.8` for a release, `v0.8.1` for a patch on top of one.
+
+**Where it must not appear**, and this is the normative half:
+
+- **`GET /api/health` still reports `{ "status": "ok" }` and nothing else.** §3.8 is unchanged and
+  its reasoning is unchanged: that endpoint is reachable from the public internet by anyone who finds
+  the hostname, and a health check that reports the build is a free fingerprint for picking a
+  matching CVE. Do not add a version, an uptime or a migration number to it.
+- **The sign-in screen shows no version**, for the same reason — it is the other page a stranger can
+  reach.
+- **No `X-Zembil-Version` header, no `<meta name="version">`, no version in the service-worker cache
+  name.** The cache name is versioned by its own constant on purpose; coupling it to the release
+  number would evict every cached shell on a patch that touched no asset.
+
+So the rule is: **the build is a fact for the family, not for the internet.** Anything behind the
+session may show it; anything in front of the session may not.
+
+### 11.2 Bumping it
+
+The minor number *is* the milestone. Shipping M9 makes it `0.9.0` whether M9 was large or small,
+because the milestone is the unit this project plans, tests, audits and documents in. A fix between
+milestones takes the patch. It stays on `0.x` until something makes a compatibility promise to
+somebody outside this household — the frozen contract is that promise today, and a `1.0` would need a
+D-entry saying what it means and to whom.
+
+Four places move together, and each is asserted or read by something:
+
+1. `src/lib/version.ts` — `VERSION` and `RELEASED_ON`
+2. `package.json` — `version`
+3. `docs/VERSIONS.md` — a new entry at the top
+4. `PROJECT.md` §2 — the current-version row
+
+`RELEASED_ON` is a literal, not a build timestamp. A build timestamp would move every time the image
+is rebuilt, so "as of" would drift with no change to the app, and an operator comparing two
+containers could not tell a rebuild from a release.

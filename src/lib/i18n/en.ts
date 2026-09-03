@@ -225,6 +225,8 @@ export const en = {
 	youLanguage: 'Language',
 	youLanguageBusy: 'Changing…',
 	youManage: 'Manage the family',
+	/** M9. `version` arrives as "v0.8", `date` already formatted in this locale. */
+	youVersion: (version: string, date: string) => `Zembil ${version} · as of ${date}`,
 	youSignOut: 'Sign out',
 
 	// ---- push (§8.7) ----------------------------------------------------

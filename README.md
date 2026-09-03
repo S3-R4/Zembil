@@ -312,6 +312,22 @@ black rules rather than the warm greys the other light themes use.
 
 ---
 
+## Which version am I running?
+
+The foot of the **account screen** shows it: `Zembil v0.8 · as of 3 September 2026`.
+
+It is there and not on the sign-in screen, and **not** on `GET /api/health`, on purpose. Both of
+those are reachable by anybody who finds the hostname, and a build number in front of the login is a
+free hint for someone shopping for a matching vulnerability. If you need the version from the shell:
+
+```sh
+docker compose exec zembil node -e "console.log(require('/app/package.json').version)"
+```
+
+`docs/VERSIONS.md` in the repository is the release log — what changed in each version, newest first.
+
+---
+
 ## Data and backups
 
 Everything lives in one Docker volume, `zembil_data`, as `zembil.db` plus its `-wal` and `-shm`

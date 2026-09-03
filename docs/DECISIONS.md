@@ -1377,3 +1377,55 @@ sun, which is the brief's actual operating environment.
 **What is not built:** a custom colour picker, a per-store theme, an accent-only override, or a
 scheduled day/night switch. `auto` already tracks the OS's own schedule, which is where a member has
 configured that once for every app they own.
+
+---
+
+## D-048 — A version number, tied to the milestone, shown behind the session and nowhere else
+
+**Status:** accepted (M8). **Contract:** §11.
+
+The app had no version anywhere except an untouched `"version": "0.1.0"` in `package.json`, seven
+milestones after that was true. Three things wanted one: a member saying which build their phone is
+on, an operator comparing two containers, and an agent picking the project up cold and needing to
+know what "last" means.
+
+**`0.<milestone>.<patch>`, and the minor number *is* the milestone.** Rejected: semver by
+compatibility. Semver's minor/patch distinction describes what a change does to an API's consumers,
+and this API has exactly one consumer — its own frontend, shipped in the same image, from the same
+commit. There is no version skew to describe, so a scheme built to describe it would be decoration
+that still had to be decided milestone by milestone. What the project actually plans, tests, audits
+and documents in is the milestone, so that is what the number counts, and `docs/VERSIONS.md` reads
+straight off the milestone table.
+
+**Still `0.x`.** The compatibility promise here is `docs/CONTRACT.md`, which is frozen and
+addendum-extended; the version number promises nothing to anybody. Calling it `1.0` because the app
+is deployed and complete would be borrowing meaning from a convention this project does not use. If
+Zembil ever grows a consumer outside the household, that milestone earns the major bump and should
+say so in its own D-entry.
+
+**The date is a literal, not a build timestamp.** `RELEASED_ON = '2026-09-03'` rather than
+`__BUILD_TIME__`. A timestamp changes on every rebuild, so "as of" would drift while nothing about
+the app changed, and an operator comparing two running containers could not tell a rebuild from a
+release — which is the one question the date exists to answer. The cost is a constant somebody has to
+remember to bump; that is why the bump list is in the contract (§11.2) and why a test compares the
+module against `package.json` and against the release log's top heading. Three of the four places
+fail loudly if they drift.
+
+**Behind the session, and nowhere in front of it.** This is the part that took the most thought,
+because §3.8 already refused to put a version on `GET /api/health` and gave the reason: a health
+endpoint reachable from the public internet that reports the build is a free fingerprint for picking
+a matching CVE. That reasoning does not stop at `/api/health`. The sign-in screen is the other page a
+stranger can reach, so it shows nothing either — and there is no version header and no
+`<meta name="version">`, both of which would have been the lazy way to satisfy "show the version".
+`/you` is behind the session, so the family learns the build and the internet does not. §11.1 states
+it as a rule rather than leaving it to whoever adds the next surface.
+
+Also rejected: **versioning the service-worker cache name with the release number.** It looks tidy
+and it would evict every cached shell on a patch that touched no asset. The cache keeps its own
+constant.
+
+**Why the account screen's foot, at 11px.** The brief asked for small and subtle, and that is also
+what it should be: it is a fact somebody goes looking for, never one they read on the way past. It is
+a `<footer>` rather than another `.z-panel` because it is not a setting and nothing in it can be
+tapped. The e2e suite asserts the size ceiling, the absence of any control inside it, and that it
+sits below the last button — so "subtle" is a testable claim rather than a note in a review.

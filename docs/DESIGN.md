@@ -142,7 +142,7 @@ is 24px and the target around it is 44px.
 | Item detail | sheet | Item, Quantity or note, Store, Delete, Save |
 | Finish trip | confirm sheet | Bought / Left on the list / Keep shopping |
 | Trips | `/trips` | history; "See 8 items"; per-trip item preview |
-| Account | `/you` | passkeys with "Used 2 minutes ago" + Remove; Notifications; Language; Theme (M8: a dropdown of eight, saved to the account); Sign out |
+| Account | `/you` | passkeys with "Used 2 minutes ago" + Remove; Notifications; Language; Theme (M8: a dropdown of eight, saved to the account); Sign out; **the version line** (M8: `<footer>`, 11px, `--text-faint`, centred, below Sign out — a fact people look for, never one they read on the way past) |
 | Admin | `/you/admin` | "Active · 2 passkeys", "Active · password only", "Disabled 4 Aug" + Enable; New user; Reset password; Remove all passkeys; Disable user |
 
 ### Added in M6

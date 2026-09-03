@@ -8,6 +8,31 @@ breaking the things that were expensive to get right.
 It does not replace the frozen contract. `docs/CONTRACT.md` is the normative integration boundary;
 this file is the map that tells you which part of it you need.
 
+> ### If you change anything, update this file
+>
+> **This is a standing instruction, not a courtesy.** Every agent that touches Zembil arrives with no
+> memory of the last one, and this document is the entire handover. A change that lands in the code
+> and not in here does not merely go unrecorded — it makes the rest of the file wrong, and the next
+> agent will act on the wrong version confidently.
+>
+> Before you call any piece of work done, walk this list. It takes minutes and it is part of the
+> task, not paperwork after it:
+>
+> | What you changed | Update |
+> |---|---|
+> | Anything at all | **§2** — the version row, the test counts, and a row in the milestone table |
+> | Anything at all | `docs/VERSIONS.md` — a new entry at the top, plus `src/lib/version.ts` and `package.json` (CONTRACT §11.2) |
+> | Schema, API, invariant, rollover rule | `docs/CONTRACT.md` — a new **addendum section**; never edit a frozen one |
+> | A decision, or the reversal of one | `docs/DECISIONS.md` — a new **D-entry**, with what you rejected and why; never silently rewrite an old one |
+> | Anything visual | `docs/DESIGN.md`, and §8 here if it changed a rule rather than a screen |
+> | Anything an operator runs or configures | `README.md` |
+> | A gap you found, or one you closed | **§13** — the honest-caveats list. Closing one means striking it there, not deleting it |
+> | A guard, a validator, an early return | Mutation-sweep it (§11) and say so in the commit |
+> | Something worth doing later | `docs/BACKLOG.md`, **not** the code |
+>
+> And **§14's "highest-value things to do next"** is a live queue, not a historical record: if you
+> did one, remove it; if you learned that something else matters more, reorder it.
+
 ---
 
 ## 1. What Zembil is
@@ -62,10 +87,12 @@ Every milestone through M5 was audited and every blocking finding closed.
 
 | Signal | Value |
 |---|---|
-| Unit/integration tests | **699** (Vitest), green |
-| End-to-end specs | **24** (Playwright, Chromium at 390×844), green |
-| Type check | `npm run check` clean across **532** files |
-| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6 and M7 |
+| **Current version** | **v0.8 — 2026-09-03** (`0.8.0`; see `docs/VERSIONS.md` and CONTRACT §11) |
+| Unit/integration tests | **710** (Vitest), green |
+| End-to-end specs | **27** (Playwright, Chromium at 390×844), green |
+| Type check | `npm run check` clean across **536** files |
+| Migrations applied | **004** (`PRAGMA user_version = 4`) |
+| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6, M7 and M8 |
 | Reviewer audits | M1 ×3, M2, M3, M4, **M6** — all closed, findings acted on |
 
 It is running in production on the owner's home server at `zembil.s3r4.tech`, fronted by a
@@ -84,7 +111,7 @@ It is running in production on the owner's home server at `zembil.s3r4.tech`, fr
 | **M5** Hardening | Act on all findings, re-verify the done-means checklist against a rebuilt image | ✅ |
 | **M6** Five features | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password | ✅ — schema delta is migration 002; contract addendum is §8 |
 | **M7** Delete a shop | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been | ✅ — **no migration**; contract addendum is §9 |
-| **M8** Visibility authority & themes | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side | ✅ — schema delta is migration 004; contract addendum is §10 |
+| **M8** Visibility authority, themes, versioning | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side; a version number, shown behind the session | ✅ — **v0.8**; schema delta is migration 004; contract addenda are §10 and §11 |
 
 ---
 
@@ -528,6 +555,11 @@ something.
 4. **Do not scope-creep.** Something worth doing later goes in `docs/BACKLOG.md`, not into the code.
 5. **Run the reviewer after every milestone**, act on its findings before moving on, and **report its
    verdict verbatim** to the user.
+6. **Bump the version and update this file in the same commit as the change.** Not afterwards, and
+   not "once it settles". The version bump is four lines (CONTRACT §11.2) and the documentation walk
+   is the table at the top of this file. This rule exists because the failure it prevents is silent:
+   a green suite says nothing about whether the next agent will be told the truth, and every other
+   process rule here was written down by somebody who had already been bitten.
 
 ### Subagents and file ownership
 
@@ -600,7 +632,8 @@ seams that are left to convention drift.)
 | `design/Zembil.dc.html` | 22 artboards at 390×844. | **Visual source of truth** — beats `DESIGN.md`. |
 | `docs/BACKLOG.md` | Everything deliberately not built, with the reason. | Append here instead of building. |
 | `README.md` | Operator documentation: deploy, reverse proxy (Caddy/nginx/Traefik), bootstrap, accounts, passkeys, backup, restore, recovery, configuration. | For humans running it. |
-| `PROJECT.md` | This file. | Orientation. |
+| `docs/VERSIONS.md` | The release log, newest first, one entry per version. Its top heading is asserted against `src/lib/version.ts` by a test. | What shipped when. |
+| `PROJECT.md` | This file. | Orientation — **and the handover. Keep it current; see the box at the top.** |
 
 ---
 
@@ -608,6 +641,13 @@ seams that are left to convention drift.)
 
 Read this section before you trust a claim made elsewhere in the docs.
 
+- **The version is hand-bumped, and nothing enforces that you did it.** `src/lib/version.ts`,
+  `package.json` and `docs/VERSIONS.md` are asserted against *each other* by
+  `tests/client/version.test.ts`, so they cannot drift apart — but nothing detects a milestone that
+  shipped without bumping any of the three, because there is nothing to compare them to. A CI check
+  against the tag or the branch's commit count would close it; on a one-deployment project the
+  process rule (§11 rule 6) is the control, and it is worth knowing that it is a process rule rather
+  than a test.
 - **`ZEMBIL_LOG_LEVEL` does nothing.** It is parsed and validated at startup in `config.ts` and
   **nothing reads it**. `.env.example` and `README.md` now say so plainly rather than describing
   behaviour that does not exist. A `log(level, …)` helper is about an hour's work; the bootstrap
@@ -706,13 +746,16 @@ Read this section before you trust a claim made elsewhere in the docs.
 
 ### Before you call it done
 
-- `npm test` (Vitest, 699) and `npm run test:e2e` (Playwright, 24) green. **Build before the e2e
+- `npm test` (Vitest, 710) and `npm run test:e2e` (Playwright, 27) green. **Build before the e2e
   run** — `test:e2e` serves `build/index.js` and does not rebuild it, so a stale build silently tests
   the previous commit.
 - `npm run check` clean.
 - **Run a mutation sweep over the guards you added.** Break each one; anything that stays green is a
   finding.
 - Run `zembil-reviewer` over the change and act on the findings.
+- **Bump the version** (`src/lib/version.ts`, `package.json`, `docs/VERSIONS.md`, §2 above) and walk
+  the documentation table at the top of this file. A change that is not written down is a change the
+  next agent will contradict.
 
 ### The highest-value things to do next, in order
 
@@ -731,7 +774,9 @@ Read this section before you trust a claim made elsewhere in the docs.
    cheap on the existing model.
 
 *(The store-edit UI that used to sit at position 5 was built in M6 — D-043 explains why it came along
-with store visibility rather than waiting its turn.)*
+with store visibility rather than waiting its turn. Nothing on the list above was consumed by M8:
+its three changes were owner-requested and arrived out of band, which is normal for this project and
+is why the queue is a queue and not a plan.)*
 
 ### Things not to do
 
@@ -749,7 +794,15 @@ with store visibility rather than waiting its turn.)*
 - Do not add a confirmation token, a `?really=true` or a typed-shop-name field to
   `DELETE /api/stores/{id}`. The confirmation is a UI rule on purpose (D-045, §9.4).
 - Do not make an authorization decision about a store anywhere except `requireVisibleStore` /
-  `isVisibleTo`. Nothing else may read `stores.private_to` to decide something.
+  `isVisibleTo` for visibility, and `mayChangeVisibility` for the right to change it. Nothing else
+  may read `stores.private_to` or `stores.created_by` to decide something.
+- Do not make `Actor.isAdmin` an input to `isVisibleTo`. It grants one thing (§10.1) and D-040 is not
+  it.
+- Do not put a version, an uptime or a migration number on `GET /api/health`, on the sign-in screen,
+  or in a response header. The build is a fact for the family, not for the internet (§11.1, D-048).
+- Do not derive the version from a build timestamp, and do not let the four places that carry it
+  drift apart (CONTRACT §11.2).
+- Do not leave this file behind the code. See the box at the top.
 - Do not read the locale from a request header after account creation, and do not put the current
   locale in a module-level `$state` — SSR shares module state across concurrent requests.
 - Do not translate a server error message on the client.

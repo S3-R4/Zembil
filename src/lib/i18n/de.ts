@@ -221,6 +221,7 @@ export const de: Messages = {
 	youLanguage: 'Sprache',
 	youLanguageBusy: 'Wird geändert…',
 	youManage: 'Familie verwalten',
+	youVersion: (version: string, date: string) => `Zembil ${version} · Stand ${date}`,
 	youSignOut: 'Abmelden',
 
 	// ---- push (§8.7) ----------------------------------------------------

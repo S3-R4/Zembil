@@ -216,6 +216,7 @@ export const tr: Messages = {
 	youLanguage: 'Dil',
 	youLanguageBusy: 'Değiştiriliyor…',
 	youManage: 'Aileyi yönet',
+	youVersion: (version: string, date: string) => `Zembil ${version} · ${date} itibarıyla`,
 	youSignOut: 'Çıkış yap',
 
 	// ---- push (§8.7) ----------------------------------------------------

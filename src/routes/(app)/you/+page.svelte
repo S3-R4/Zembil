@@ -4,8 +4,9 @@
 	import { api } from '$lib/client/api';
 	import { forgetLists, messageOf } from '$lib/client/app.svelte';
 	import { applyTheme } from '$lib/client/theme';
-	import { relative } from '$lib/client/time';
+	import { longDate, relative } from '$lib/client/time';
 	import { messages } from '$lib/client/i18n';
+	import { displayVersion, releasedAt } from '$lib/version';
 	import { LANGUAGE_NAMES } from '$lib/i18n';
 	import { disablePush, enablePush, readPushState, type PushState } from '$lib/client/push';
 	import { LOCALES, THEMES, type Locale, type Passkey, type Theme, type User } from '$lib/types';
@@ -355,6 +356,22 @@
 	<button class="z-btn z-btn--tertiary" type="button" disabled={busy} onclick={signOut}>
 		{m.youSignOut}
 	</button>
+
+	<!--
+	  The version, small and last (§11.1).
+
+	  Here and nowhere else: this screen is behind the session, so the build is
+	  told only to the family. `GET /api/health` deliberately reports no version
+	  (§3.8) and the sign-in screen deliberately shows none, because both are
+	  reachable by anyone who finds the hostname and a version string there is a
+	  free fingerprint for picking a matching CVE.
+
+	  `<footer>` rather than another `.z-panel`: it is not a setting, nothing in
+	  it can be tapped, and it should read as the bottom of the page.
+	-->
+	<footer class="version">
+		{m.youVersion(displayVersion(), longDate(releasedAt(), data.locale))}
+	</footer>
 </div>
 
 <Sheet open={naming} title={m.youPasskeyNameTitle} onclose={() => (naming = false)}>
@@ -426,6 +443,19 @@
 		color: var(--danger);
 		font-size: 15px;
 		font-weight: 700;
+	}
+
+	.version {
+		/* Below the type scale's smallest role on purpose: it is a fact somebody
+		 * looks for, never one they read on the way past. */
+		padding: 4px 0 2px;
+		color: var(--text-faint);
+		font-size: 11px;
+		letter-spacing: 0.02em;
+		text-align: center;
+		/* It sits under the last button, and the account screen already carries
+		 * the safe-area padding on its container — so nothing here needs to know
+		 * about the home indicator. */
 	}
 
 	.faint {

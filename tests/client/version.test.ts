@@ -16,6 +16,7 @@ import { RELEASED_ON, VERSION, displayVersion, releasedAt } from '$lib/version';
 import { longDate } from '$lib/client/time';
 
 const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+const lock = JSON.parse(readFileSync(new URL('../../package-lock.json', import.meta.url), 'utf8'));
 const versions = readFileSync(new URL('../../docs/VERSIONS.md', import.meta.url), 'utf8');
 
 describe('the version is written once', () => {
@@ -24,6 +25,8 @@ describe('the version is written once', () => {
 		// into a client-bundled module would ship the whole manifest to every
 		// browser — the fingerprint §3.8 refuses to serve.
 		expect(pkg.version).toBe(VERSION);
+		expect(lock.version).toBe(VERSION);
+		expect(lock.packages[''].version).toBe(VERSION);
 	});
 
 	it('is `0.<milestone>.<patch>`, all three numeric', () => {
@@ -97,7 +100,7 @@ describe('longDate', () => {
 	});
 
 	it('renders the release date without shifting the day', () => {
-		expect(longDate(releasedAt(), 'en')).toBe('3 September 2026');
+		expect(longDate(releasedAt(), 'en')).toBe('4 September 2026');
 	});
 
 	it('actually uses the locale it was handed', () => {

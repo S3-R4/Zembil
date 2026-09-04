@@ -1,6 +1,6 @@
 # Zembil
 
-A shopping list for one household, self-hosted. *Zembil* is Turkish for a woven basket.
+A shopping list for one household, self-hosted. _Zembil_ is Turkish for a woven basket.
 
 Lists are per store. Ticking an item does not delete it — it stays visible as history and sinks to
 the bottom of the list, and it can be un-ticked. When a trip is closed, anything still unticked
@@ -158,7 +158,7 @@ username. Passwords remain as the fallback — every account has one, always.
 
 **Choose `ZEMBIL_RP_ID` before the first passkey is registered, then never change it.** It defaults
 to the full hostname of `ZEMBIL_ORIGIN`, which is what you want. Setting it to a registrable domain
-(`example.com` rather than `zembil.example.com`) lets *any* page on any sibling subdomain of that
+(`example.com` rather than `zembil.example.com`) lets _any_ page on any sibling subdomain of that
 host ask for these credentials. And authenticators key credentials by rpID: changing it later
 invalidates every passkey your family has registered, silently, with no migration and no warning
 until someone tries to sign in.
@@ -183,7 +183,7 @@ somebody uses it:
 
 > If a member makes a **shared** shop private and then stops using the app, no admin can undo it from
 > inside Zembil. There is no override, deliberately — an admin can only change the visibility of a
-> shop they can still *see*, and a private one is invisible to them like everyone else.
+> shop they can still _see_, and a private one is invisible to them like everyone else.
 
 Recovery is one statement against the database:
 
@@ -214,8 +214,8 @@ Two different actions, in the same sheet, on purpose.
 Bring it back from **Archived shops** on the home screen whenever you want it. Nothing is lost.
 
 **Delete** is permanent. It removes the shop, every trip it ever had, and every item on them, for
-everyone, immediately. It takes two taps on two different buttons — the second one says *Delete
-permanently* and tells you what it is about to remove — and after that:
+everyone, immediately. It takes two taps on two different buttons — the second one says _Delete
+permanently_ and tells you what it is about to remove — and after that:
 
 > There is no undo, and no admin can bring it back. **The only recovery is your backup.**
 
@@ -240,7 +240,7 @@ somebody adds something to a list — but not one per item.
 **How the batching works.** Adding an item starts a timer rather than sending anything. Every further
 change to that shop's list — another item, a tick, an edit, someone claiming the trip — restarts the
 timer. Once the list has been quiet for `ZEMBIL_NOTIFY_QUIET_MINUTES` (default 5), **one**
-notification goes out naming what was added: *"Migros — milk, bread and 4 more."*
+notification goes out naming what was added: _"Migros — milk, bread and 4 more."_
 
 Two consequences that are intentional:
 
@@ -273,14 +273,16 @@ screen.
 
 ## Who is going to the shop
 
-Anyone can claim a trip — *"I'm going to Migros"* — from that shop's screen, with an optional short
-note like *"only getting the milk"*. Everyone sees it on the home screen and on the list.
+Anyone can claim a trip — _"I'm going to Migros"_ — from that shop's screen, with an optional short
+note like _"only getting the milk"_. Everyone sees it on the home screen and on the list.
 
 A claim lasts for **one trip**, not forever. Finishing the trip ends it; there is nothing to remember
 to release, though the person who claimed it can release it early. If somebody else has already
 claimed a trip, claiming it offers to take over instead of failing.
 
 The claim stays on the finished trip, so the history shows who did each shop.
+If your plans change, **I’m not going** is visible directly beside your claim; you do not have to
+open the note editor or finish the trip to release it.
 
 ---
 
@@ -295,26 +297,30 @@ is not the person who triggered them, so they cannot be translated by the phone 
 New accounts start in whichever of the three the creating browser asked for via `Accept-Language`,
 falling back to English.
 
+The installed-app description and the no-signal fallback use the same language. The service worker
+stores only the three-value language choice for that purpose — it still never caches a signed-in page,
+an API response or any shopping data.
+
 ---
 
 ## Themes
 
-The account screen has a **Theme** dropdown with eight options: *Follow my device*, *Paper*, *Night*,
-*Linen*, *Olive*, *High contrast*, *Indigo* and *Mulberry*. *Follow my device* is the default and
+The account screen has a **Theme** dropdown with eight options: _Follow my device_, _Paper_, _Night_,
+_Linen_, _Olive_, _High contrast_, _Indigo_ and _Mulberry_. _Follow my device_ is the default and
 tracks the phone's own light/dark setting.
 
 Like the language, it is a property of the **person, not the device** — sign in on the tablet and it
 looks the same as the phone. It is also applied by the server before the page is drawn, so there is
 no flash of the previous theme on a cold open.
 
-*High contrast* is worth knowing about if somebody is reading the list in direct sun: black text and
+_High contrast_ is worth knowing about if somebody is reading the list in direct sun: black text and
 black rules rather than the warm greys the other light themes use.
 
 ---
 
 ## Which version am I running?
 
-The foot of the **account screen** shows it: `Zembil v0.8 · as of 3 September 2026`.
+The foot of the **account screen** shows it: `Zembil v0.10 · as of 4 September 2026`.
 
 It is there and not on the sign-in screen, and **not** on `GET /api/health`, on purpose. Both of
 those are reachable by anybody who finds the hostname, and a build number in front of the login is a
@@ -366,7 +372,7 @@ Restoring replaces the database:
 ./scripts/restore.sh backups/zembil-20260831-175645Z.db
 ```
 
-It validates the backup *before* touching anything, then refuses to continue unless Docker actually
+It validates the backup _before_ touching anything, then refuses to continue unless Docker actually
 answered when asked whether the app is running — "I could not tell" is not "it is not running", and
 treating it that way swaps the database out from under a live process that keeps writing into the
 file it was rescued from. It stops the container, copies the backup in **beside** the live database
@@ -417,7 +423,7 @@ There is exactly one, and only if you choose to set it: `ZEMBIL_BOOTSTRAP_ADMIN_
 Everything else in that file is configuration. `.env` is git-ignored and must stay that way; it is
 never copied into the image (`.dockerignore` excludes it, and the build context is checked).
 
-There is no application *signing* secret to provision or rotate: sessions are opaque random tokens
+There is no application _signing_ secret to provision or rotate: sessions are opaque random tokens
 stored only as SHA-256 hashes, so nothing needs signing.
 
 The one secret the application holds, it creates for itself: the **VAPID keypair** used to sign push
@@ -451,10 +457,10 @@ rejects an IP literal before any request leaves the browser.
 `npm run test:e2e` builds nothing for you: run `npm run build` first. It starts the real production
 server against a throwaway database in `.playwright-data/`, which it wipes on every run.
 
-| Document | What it is |
-|---|---|
-| [`PLAN.md`](PLAN.md) | Stack, milestones, file ownership, test strategy |
-| [`docs/CONTRACT.md`](docs/CONTRACT.md) | **The frozen integration boundary.** Schema, rollover rules, HTTP API, session and env contract |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Why each choice was made, and what was rejected |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | Design tokens and screen specs, distilled from the canvas |
-| [`docs/BACKLOG.md`](docs/BACKLOG.md) | Deliberately deferred |
+| Document                                 | What it is                                                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [`PLAN.md`](PLAN.md)                     | Stack, milestones, file ownership, test strategy                                                |
+| [`docs/CONTRACT.md`](docs/CONTRACT.md)   | **The frozen integration boundary.** Schema, rollover rules, HTTP API, session and env contract |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Why each choice was made, and what was rejected                                                 |
+| [`docs/DESIGN.md`](docs/DESIGN.md)       | Design tokens and screen specs, distilled from the canvas                                       |
+| [`docs/BACKLOG.md`](docs/BACKLOG.md)     | Deliberately deferred                                                                           |

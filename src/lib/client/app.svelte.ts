@@ -7,7 +7,8 @@
  * server agrees is a tick or an untick — see `tick()` below for why that one
  * is worth the complexity and the others are not.
  */
-import type { Item, ItemMutation, StoreSummary, Trip } from '$lib/types';
+import type { Item, ItemMutation, RecentItemSuggestions, StoreSummary, Trip } from '$lib/types';
+import { itemNameKey } from '$lib/item-name';
 import { ApiError, OfflineError, api } from './api';
 
 /** R-13, applied client-side so an optimistic tick lands in the right place
@@ -99,10 +100,10 @@ export class Shops {
 
 	/** `PATCH /api/stores/{id}` — name, colour, sortOrder, archived, visibility. */
 	async patch(storeId: string, patch: StorePatch): Promise<StoreSummary> {
-		const body = await api<{ store: StoreSummary }>(
-			`/api/stores/${encodeURIComponent(storeId)}`,
-			{ method: 'PATCH', body: patch }
-		);
+		const body = await api<{ store: StoreSummary }>(`/api/stores/${encodeURIComponent(storeId)}`, {
+			method: 'PATCH',
+			body: patch
+		});
 		await this.load();
 		return body.store;
 	}
@@ -151,6 +152,8 @@ export class ListState {
 	error = $state<string | null>(null);
 	loading = $state(false);
 	loaded = $state(false);
+	suggestions = $state<string[]>([]);
+	suggestionsLoading = $state(false);
 	/** §4's cursor. The rev we last saw, so an echo of our own write does not
 	 *  cost a second full fetch. */
 	rev = $state(-1);
@@ -192,9 +195,7 @@ export class ListState {
 		// answer for that row is on its way and will replace it; letting a refetch
 		// that landed first revert the checkbox would show a flicker nobody asked
 		// for, on the one action a member performs several times a minute.
-		const inFlight = new Map(
-			this.items.filter((i) => this.busy.has(i.id)).map((i) => [i.id, i])
-		);
+		const inFlight = new Map(this.items.filter((i) => this.busy.has(i.id)).map((i) => [i.id, i]));
 
 		this.store = data.store;
 		this.trip = data.trip;
@@ -209,9 +210,11 @@ export class ListState {
 		const mine = ++this.generation;
 		this.loading = true;
 		try {
-			const body = await api<{ store: StoreSummary; trip: Trip; items: Item[] }>(
-				`/api/stores/${encodeURIComponent(this.storeId)}/list`
-			);
+			const body = await api<{
+				store: StoreSummary;
+				trip: Trip;
+				items: Item[];
+			}>(`/api/stores/${encodeURIComponent(this.storeId)}/list`);
 			// Superseded while we were waiting. Dropping it is the whole point.
 			if (mine !== this.generation) return;
 			this.seed(body);
@@ -221,6 +224,27 @@ export class ListState {
 		} finally {
 			if (mine === this.generation) this.loading = false;
 		}
+	}
+
+	async loadSuggestions(): Promise<void> {
+		if (this.suggestionsLoading) return;
+		this.suggestionsLoading = true;
+		try {
+			const body = await api<RecentItemSuggestions>(
+				`/api/stores/${encodeURIComponent(this.storeId)}/suggestions?limit=8`
+			);
+			this.suggestions = body.suggestions;
+		} catch {
+			// Suggestions are an enhancement to composing, never a reason adding fails.
+			this.suggestions = [];
+		} finally {
+			this.suggestionsLoading = false;
+		}
+	}
+
+	hasActiveName(name: string): boolean {
+		const key = itemNameKey(name);
+		return key.length > 0 && this.items.some((item) => itemNameKey(item.name) === key);
 	}
 
 	/** §4: a hint whose rev we already have is not worth a fetch. */
@@ -288,7 +312,10 @@ export class ListState {
 		this.error = null;
 		try {
 			this.applyMutation(
-				await api<ItemMutation>(`/api/items/${item.id}/${action}`, { method: 'POST', body: {} })
+				await api<ItemMutation>(`/api/items/${item.id}/${action}`, {
+					method: 'POST',
+					body: {}
+				})
 			);
 		} catch (err) {
 			// Put THIS row back as it was, rebased onto whatever the list looks like
@@ -297,7 +324,10 @@ export class ListState {
 			// bad connection would delete another member's freshly-arrived row.
 			this.items = sortItems(this.items.map((i) => (i.id === item.id ? item : i)));
 			this.error = messageOf(err);
-			if (err instanceof ApiError && (err.code === 'TRIP_CLOSED' || err.code === 'ITEM_NOT_FOUND')) {
+			if (
+				err instanceof ApiError &&
+				(err.code === 'TRIP_CLOSED' || err.code === 'ITEM_NOT_FOUND')
+			) {
 				await this.load();
 			}
 		} finally {
@@ -308,10 +338,13 @@ export class ListState {
 	/** §3.5: `clientId` is required and is reused across every retry of one
 	 *  compose, so a timeout on cellular cannot produce a duplicate. */
 	async add(name: string, note: string | null, clientId: string): Promise<Item> {
-		const body = await api<{ item: Item }>(`/api/stores/${encodeURIComponent(this.storeId)}/items`, {
-			method: 'POST',
-			body: note ? { name, note, clientId } : { name, clientId }
-		});
+		const body = await api<{ item: Item }>(
+			`/api/stores/${encodeURIComponent(this.storeId)}/items`,
+			{
+				method: 'POST',
+				body: note ? { name, note, clientId } : { name, clientId }
+			}
+		);
 		await this.load();
 		return body.item;
 	}
@@ -326,7 +359,9 @@ export class ListState {
 	}
 
 	async remove(item: Item): Promise<void> {
-		const result = await api<ItemMutation>(`/api/items/${item.id}`, { method: 'DELETE' });
+		const result = await api<ItemMutation>(`/api/items/${item.id}`, {
+			method: 'DELETE'
+		});
 		this.rev = result.rev;
 		this.items = this.items.filter((i) => i.id !== item.id);
 		if (this.store) this.store = { ...this.store, rev: result.rev };

@@ -13,6 +13,7 @@
 	import { newClientId } from '$lib/client/api';
 	import { STORE_COLORS } from '$lib/client/palette';
 	import { messages } from '$lib/client/i18n';
+	import { itemNameKey } from '$lib/item-name';
 	import type { StoreSummary } from '$lib/types';
 	import Banner from '$lib/components/Banner.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
@@ -40,9 +41,8 @@
 	// ---- add an item ------------------------------------------------------
 	let adding = $state(false);
 	let chosenStore = $state<string | null>(null);
-	let targetStore = $derived(
-		stores.find((s) => s.id === chosenStore) ?? stores[0] ?? null
-	);
+	let targetStore = $derived(stores.find((s) => s.id === chosenStore) ?? stores[0] ?? null);
+	let targetList = $derived(targetStore ? listFor(targetStore.id) : null);
 	let draftName = $state('');
 	let draftNote = $state('');
 	let addBusy = $state(false);
@@ -54,11 +54,33 @@
 	// else is a new item rather than a retry of the old one.
 	let clientId = $state(newClientId());
 	let failedFor = $state<string | null>(null);
+	let duplicateArmedKey = $state<string | null>(null);
+	let duplicateKey = $derived(itemNameKey(draftName));
+	let duplicate = $derived(
+		duplicateKey.length > 0 && (targetList?.hasActiveName(draftName) ?? false)
+	);
+	let visibleSuggestions = $derived(
+		(targetList?.suggestions ?? []).filter((name) => !targetList?.hasActiveName(name))
+	);
 
 	function openAdd() {
 		addError = null;
 		justAdded = null;
 		adding = true;
+		if (targetList) void Promise.all([targetList.load(), targetList.loadSuggestions()]);
+	}
+
+	function chooseStore(storeId: string) {
+		chosenStore = storeId;
+		duplicateArmedKey = null;
+		const next = listFor(storeId);
+		void Promise.all([next.load(), next.loadSuggestions()]);
+	}
+
+	function chooseSuggestion(name: string) {
+		draftName = name;
+		duplicateArmedKey = null;
+		nameInput?.focus();
 	}
 
 	async function submitAdd(event: SubmitEvent) {
@@ -66,6 +88,10 @@
 		const store = targetStore;
 		const name = draftName.trim();
 		if (addBusy || !store || name.length === 0) return;
+		if (duplicate && duplicateArmedKey !== duplicateKey) {
+			duplicateArmedKey = duplicateKey;
+			return;
+		}
 
 		if (failedFor !== null && failedFor !== name) {
 			clientId = newClientId();
@@ -78,11 +104,13 @@
 			justAdded = added.name;
 			draftName = '';
 			draftNote = '';
+			duplicateArmedKey = null;
 			clientId = newClientId();
 			failedFor = null;
 			// The sheet stays open: the second item should cost one tap, not four.
 			nameInput?.focus();
 			await shops.load();
+			void listFor(store.id).loadSuggestions();
 		} catch (err) {
 			failedFor = name;
 			addError = messageOf(err);
@@ -221,7 +249,8 @@
 		</ul>
 	{/if}
 
-	<button class="add-shop" type="button" onclick={() => (addingShop = true)}>{m.homeAddShop}</button>
+	<button class="add-shop" type="button" onclick={() => (addingShop = true)}>{m.homeAddShop}</button
+	>
 	<button class="add-shop" type="button" onclick={openArchived}>{m.homeArchivedOpen}</button>
 </div>
 
@@ -254,6 +283,19 @@
 			autofocus
 			bind:value={draftName}
 		/>
+		{#if duplicate}
+			<p class="duplicate" role="status">{m.addDuplicate(draftName.trim())}</p>
+		{/if}
+		{#if visibleSuggestions.length > 0 && draftName.trim().length === 0}
+			<fieldset class="suggestions">
+				<legend class="z-eyebrow">{m.addRecent}</legend>
+				<div>
+					{#each visibleSuggestions as suggestion (suggestion)}
+						<button type="button" onclick={() => chooseSuggestion(suggestion)}>{suggestion}</button>
+					{/each}
+				</div>
+			</fieldset>
+		{/if}
 		<label class="sr-only" for="quick-note">{m.addNotePlaceholder}</label>
 		<input
 			class="z-field"
@@ -275,7 +317,7 @@
 							data-color={store.color}
 							class:on={targetStore?.id === store.id}
 							aria-pressed={targetStore?.id === store.id}
-							onclick={() => (chosenStore = store.id)}
+							onclick={() => chooseStore(store.id)}
 						>
 							{store.name}
 						</button>
@@ -285,7 +327,13 @@
 		{/if}
 
 		<button class="z-btn" type="submit" disabled={addBusy || draftName.trim().length === 0}>
-			{addBusy ? m.addBusy : targetStore?.name ? m.addSubmit(targetStore.name) : m.addSubmitAny}
+			{addBusy
+				? m.addBusy
+				: duplicate && duplicateArmedKey === duplicateKey
+					? m.addDuplicateAnyway
+					: targetStore?.name
+						? m.addSubmit(targetStore.name)
+						: m.addSubmitAny}
 		</button>
 	</form>
 </Sheet>
@@ -561,5 +609,30 @@
 		font-size: 15px;
 		font-weight: 600;
 		color: var(--accent-deep);
+	}
+
+	.duplicate {
+		margin: -4px 2px 0;
+		color: var(--accent-deep);
+		font-size: 15px;
+		font-weight: 700;
+	}
+
+	.suggestions div {
+		display: flex;
+		gap: 8px;
+		overflow-x: auto;
+		padding-bottom: 2px;
+	}
+
+	.suggestions button {
+		flex: none;
+		min-height: 44px;
+		padding: 0 14px;
+		border-radius: 14px;
+		background: var(--surface-muted);
+		color: var(--text-2);
+		font-size: 15px;
+		font-weight: 600;
 	}
 </style>

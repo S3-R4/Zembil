@@ -37,15 +37,7 @@ export const DEFAULT_LOCALE: Locale = 'en';
  * `<html data-theme>` before the first paint. The previous device-local
  * arrangement is what PROJECT.md §13 listed as the theme-flash gap.
  */
-export type Theme =
-	| 'auto'
-	| 'light'
-	| 'dark'
-	| 'sepia'
-	| 'sage'
-	| 'contrast'
-	| 'indigo'
-	| 'plum';
+export type Theme = 'auto' | 'light' | 'dark' | 'sepia' | 'sage' | 'contrast' | 'indigo' | 'plum';
 
 /** Picker order: the three that existed first, then light-family, then dark. */
 export const THEMES: readonly Theme[] = Object.freeze([
@@ -90,14 +82,7 @@ export interface Passkey {
 }
 
 export type StoreColor =
-	| 'terracotta'
-	| 'green'
-	| 'violet'
-	| 'blue'
-	| 'amber'
-	| 'rose'
-	| 'teal'
-	| 'slate';
+	'terracotta' | 'green' | 'violet' | 'blue' | 'amber' | 'rose' | 'teal' | 'slate';
 
 /**
  * `public` — every signed-in member sees the store.
@@ -178,6 +163,11 @@ export interface Item {
 	version: number;
 	createdAt: number;
 	createdByName: string | null;
+}
+
+/** GET /api/stores/{storeId}/suggestions — CONTRACT §12.1. */
+export interface RecentItemSuggestions {
+	suggestions: string[];
 }
 
 export interface ApiError {

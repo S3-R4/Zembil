@@ -3,7 +3,7 @@
 Newest first. **The top heading is the version the app reports**, and a test asserts that
 (`tests/client/version.test.ts`), so this file cannot quietly fall behind the build.
 
-The scheme is `0.<milestone>.<patch>` — the minor number *is* the milestone, because the milestone is
+The scheme is `0.<milestone>.<patch>` — the minor number _is_ the milestone, because the milestone is
 the unit this project plans, tests, audits and documents in. It stays on `0.x` because the frozen
 contract is the compatibility promise here, not the version number; a `1.0` would need a D-entry
 saying what it is promising and to whom. `src/lib/version.ts` states the full rule.
@@ -18,6 +18,28 @@ committed, not dates anything was cut. M1–M4 all landed on 2026-08-31; they we
 against a contract frozen first (D-031), which is why four "releases" share a day.
 
 ---
+
+## v0.10 — 2026-09-04
+
+**Faster repeat shopping and fully localised offline surfaces.** (M10)
+
+- The quick-add sheet offers the eight most recently bought, distinct items for that shop. Items
+  already on the current list stay out of the suggestions. Contract §12.1, D-051.
+- A same-name item now produces a non-blocking duplicate warning; a second explicit tap still adds it,
+  because different quantities and notes can make duplicates intentional.
+- Items carried more than once receive a stronger “still needed” nudge, and the finish sheet says how
+  many pending items have already carried before.
+- A member holding a trip claim can release it directly from the claim strip, without opening the
+  note editor. Navigation still never releases automatically.
+- Offline fallback pages and PWA install metadata now follow English, Turkish or German without ever
+  caching an authenticated document. Contract §12.3.
+- Documentation consistency tests now keep the PROJECT test counts, decision range and migration
+  number aligned; their first run caught the existing 28-vs-27 Playwright drift and D-047-vs-D-050
+  decision drift.
+
+Tests: 724 unit/integration (7 deployment checks skipped without the Docker test image), 31 e2e
+(including setup).
+No migration; contract addendum §12.
 
 ## v0.9.1 — 2026-09-03
 

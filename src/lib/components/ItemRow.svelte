@@ -55,10 +55,16 @@
 			<span class="name">{item.name}</span>
 			{#if item.note}<span class="note">{item.note}</span>{/if}
 			{#if item.carryCount > 0 && !ticked}
-				<span class="note carried">{m.rowCarried(item.carryCount)}</span>
+				<span class="note carried" class:nudge={item.carryCount >= 2}>
+					{item.carryCount >= 2
+						? m.rowCarriedNudge(item.carryCount)
+						: m.rowCarried(item.carryCount)}
+				</span>
 			{/if}
 			{#if showAuthor && item.createdByName}
-				<span class="note author">{m.itemAddedBy(item.createdByName, relative(item.createdAt))}</span>
+				<span class="note author"
+					>{m.itemAddedBy(item.createdByName, relative(item.createdAt))}</span
+				>
 			{/if}
 		</span>
 	</button>
@@ -68,7 +74,12 @@
 			{m.rowUndo}
 		</button>
 	{:else}
-		<button class="edit" type="button" aria-label={m.rowEdit(item.name)} onclick={() => onopen(item)}>
+		<button
+			class="edit"
+			type="button"
+			aria-label={m.rowEdit(item.name)}
+			onclick={() => onopen(item)}
+		>
 			<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
 				<path
 					d="M4 20h4L19 9l-4-4L4 16z"
@@ -156,6 +167,10 @@
 
 	.carried {
 		color: var(--accent-deep);
+	}
+
+	.carried.nudge {
+		font-weight: 700;
 	}
 
 	.undo {

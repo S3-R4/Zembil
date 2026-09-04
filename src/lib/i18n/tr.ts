@@ -79,6 +79,9 @@ export const tr: Messages = {
 	addBusy: 'Ekleniyor…',
 	addAdded: (name: string) => `“${name}” eklendi. Başka?`,
 	addShopLegend: 'Dükkan',
+	addRecent: 'Buradan yakın zamanda alınanlar',
+	addDuplicate: (name: string) => `“${name}” zaten bu listede.`,
+	addDuplicateAnyway: 'Yine de bir tane daha ekle',
 
 	// ---- new shop -------------------------------------------------------
 	newShopTitle: 'Dükkan ekle',
@@ -110,12 +113,17 @@ export const tr: Messages = {
 	rowUndo: 'Geri al',
 	rowEdit: (name: string) => `${name} — düzenle`,
 	rowCarried: (n: number) => plural(L, n, { other: `${n} kez devredildi` }),
+	rowCarriedNudge: (n: number) => plural(L, n, { other: `${n} alışveriştir hâlâ gerekiyor` }),
 
 	finishTitle: 'Bu alışveriş bitsin mi?',
 	finishBought: (n: number) => plural(L, n, { other: `${n} ürün alındı.` }),
 	finishLeft: (n: number) =>
-		plural(L, n, { other: `Listede kalan ${n} ürün buranın sonraki listesine geçecek.` }),
+		plural(L, n, {
+			other: `Listede kalan ${n} ürün buranın sonraki listesine geçecek.`
+		}),
 	finishNothingLeft: 'Geride bir şey kalmıyor.',
+	finishCarriedAgain: (n: number) =>
+		plural(L, n, { other: `Bunların ${n} tanesi daha önce de devredildi.` }),
 	finishConfirm: 'Alışverişi bitir',
 	finishBusy: 'Bitiriliyor…',
 	finishKeep: 'Alışverişe devam',

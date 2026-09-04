@@ -4,6 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/index.js';
+import { itemNameKey } from '$lib/item-name';
 import { tx } from '../db/index.js';
 import { conflict, notFound, validationFailed } from './errors.js';
 import { emitStoreChanged } from '../realtime/bus.js';
@@ -18,7 +19,13 @@ import {
 	requireWritableStore,
 	type Actor
 } from './stores.js';
-import { clientId as validateClientId, itemVersion, itemName, itemNote } from './validate.js';
+import {
+	boundedInt,
+	clientId as validateClientId,
+	itemVersion,
+	itemName,
+	itemNote
+} from './validate.js';
 import type { Item, ItemMutation, StoreSummary, Trip } from '$lib/types';
 import { toTrip, TRIP_SELECT, type TripRow } from './rows.js';
 
@@ -127,6 +134,55 @@ export interface ListResponse {
 	items: Item[];
 }
 
+/**
+ * CONTRACT §12.1: most recently bought, distinct item names which are not
+ * already on the open list. This is intentionally a read over household-scale
+ * history rather than an FTS table or stored popularity counters.
+ */
+export function recentItemSuggestions(
+	db: Db,
+	storeId: string,
+	actor: Actor,
+	rawLimit: unknown = 8
+): string[] {
+	requireVisibleStore(db, storeId, actor.id);
+	const limit = boundedInt(rawLimit, 'limit', 1, 20);
+
+	const active = new Set(
+		(
+			db
+				.prepare(
+					`SELECT i.name
+					   FROM items i
+					   JOIN trips t ON t.id = i.trip_id
+					  WHERE i.store_id = ? AND t.status = 'open'
+					    AND i.state <> 'carried' AND i.deleted_at IS NULL`
+				)
+				.all(storeId) as Array<{ name: string }>
+		).map((row) => itemNameKey(row.name))
+	);
+
+	const rows = db
+		.prepare(
+			`SELECT name
+			   FROM items
+			  WHERE store_id = ? AND state = 'ticked' AND deleted_at IS NULL
+			  ORDER BY ticked_at DESC, id ASC`
+		)
+		.all(storeId) as Array<{ name: string }>;
+
+	const seen = new Set(active);
+	const suggestions: string[] = [];
+	for (const row of rows) {
+		const key = itemNameKey(row.name);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		suggestions.push(row.name);
+		if (suggestions.length === limit) break;
+	}
+	return suggestions;
+}
+
 /** `GET /api/stores/{storeId}/list` — §3.5. Never includes deleted or carried items. */
 export function getOpenList(db: Db, storeId: string, actor: Actor): ListResponse {
 	const actorId = actor.id;
@@ -137,7 +193,11 @@ export function getOpenList(db: Db, storeId: string, actor: Actor): ListResponse
 		.prepare(`${TRIP_SELECT} WHERE t.store_id = ? AND t.status = 'open'`)
 		.get(storeId) as unknown as TripRow | undefined;
 	if (!tripRow) throw notFound('TRIP_NOT_FOUND', 'This store has no open list.');
-	return { store, trip: toTrip(tripRow, actorId), items: listOpenItems(db, tripRow.id) };
+	return {
+		store,
+		trip: toTrip(tripRow, actorId),
+		items: listOpenItems(db, tripRow.id)
+	};
 }
 
 export interface AddItemResult extends ItemMutation {
@@ -172,7 +232,11 @@ export function addItem(
 			)
 			.get(storeId, cid) as unknown as ItemRow | undefined;
 		if (existing) {
-			return { item: toItem(existing), rev: currentRev(db, storeId), created: false };
+			return {
+				item: toItem(existing),
+				rev: currentRev(db, storeId),
+				created: false
+			};
 		}
 
 		const target = resolveOpenTrip(db, storeId);
@@ -288,7 +352,12 @@ export function deleteItem(db: Db, itemId: string, actor: Actor): DeleteResult {
 
 		if (row.deleted_at !== null && row.deleted_at !== undefined) {
 			// §3.0: already deleted — bumps nothing, emits nothing.
-			return { item: toItem(row), rev: currentRev(db, row.store_id), changed: false, storeId: row.store_id };
+			return {
+				item: toItem(row),
+				rev: currentRev(db, row.store_id),
+				changed: false,
+				storeId: row.store_id
+			};
 		}
 
 		assertWritable(row);
@@ -338,7 +407,12 @@ function setTicked(db: Db, itemId: string, ticked: boolean, actor: Actor): TickR
 
 		const target = ticked ? 'ticked' : 'pending';
 		if (row.state === target) {
-			return { item: toItem(row), rev: currentRev(db, row.store_id), changed: false, storeId: row.store_id };
+			return {
+				item: toItem(row),
+				rev: currentRev(db, row.store_id),
+				changed: false,
+				storeId: row.store_id
+			};
 		}
 
 		const ts = now();

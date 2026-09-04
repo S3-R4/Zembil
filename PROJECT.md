@@ -18,17 +18,17 @@ this file is the map that tells you which part of it you need.
 > Before you call any piece of work done, walk this list. It takes minutes and it is part of the
 > task, not paperwork after it:
 >
-> | What you changed | Update |
-> |---|---|
-> | Anything at all | **§2** — the version row, the test counts, and a row in the milestone table |
-> | Anything at all | `docs/VERSIONS.md` — a new entry at the top, plus `src/lib/version.ts` and `package.json` (CONTRACT §11.2) |
-> | Schema, API, invariant, rollover rule | `docs/CONTRACT.md` — a new **addendum section**; never edit a frozen one |
-> | A decision, or the reversal of one | `docs/DECISIONS.md` — a new **D-entry**, with what you rejected and why; never silently rewrite an old one |
-> | Anything visual | `docs/DESIGN.md`, and §8 here if it changed a rule rather than a screen |
-> | Anything an operator runs or configures | `README.md` |
-> | A gap you found, or one you closed | **§13** — the honest-caveats list. Closing one means striking it there, not deleting it |
-> | A guard, a validator, an early return | Mutation-sweep it (§11) and say so in the commit |
-> | Something worth doing later | `docs/BACKLOG.md`, **not** the code |
+> | What you changed                        | Update                                                                                                     |
+> | --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+> | Anything at all                         | **§2** — the version row, the test counts, and a row in the milestone table                                |
+> | Anything at all                         | `docs/VERSIONS.md` — a new entry at the top, plus `src/lib/version.ts` and `package.json` (CONTRACT §11.2) |
+> | Schema, API, invariant, rollover rule   | `docs/CONTRACT.md` — a new **addendum section**; never edit a frozen one                                   |
+> | A decision, or the reversal of one      | `docs/DECISIONS.md` — a new **D-entry**, with what you rejected and why; never silently rewrite an old one |
+> | Anything visual                         | `docs/DESIGN.md`, and §8 here if it changed a rule rather than a screen                                    |
+> | Anything an operator runs or configures | `README.md`                                                                                                |
+> | A gap you found, or one you closed      | **§13** — the honest-caveats list. Closing one means striking it there, not deleting it                    |
+> | A guard, a validator, an early return   | Mutation-sweep it (§11) and say so in the commit                                                           |
+> | Something worth doing later             | `docs/BACKLOG.md`, **not** the code                                                                        |
 >
 > And **§14's "highest-value things to do next"** is a live queue, not a historical record: if you
 > did one, remove it; if you learned that something else matters more, reorder it.
@@ -38,7 +38,7 @@ this file is the map that tells you which part of it you need.
 ## 1. What Zembil is
 
 A self-hosted shopping list for **one family, fewer than ten people**, running on a home server
-behind a reverse proxy with HTTPS, reachable from the public internet. *Zembil* is Turkish for a
+behind a reverse proxy with HTTPS, reachable from the public internet. _Zembil_ is Turkish for a
 woven basket — the aesthetic follows from the name.
 
 The three behaviours that make it this app rather than a generic todo list:
@@ -47,7 +47,7 @@ The three behaviours that make it this app rather than a generic todo list:
    for the pharmacy, and you shop them separately.
 2. **Ticking does not delete.** A ticked item stays visible, sinks below a divider into an "in the
    basket" section, and can be un-ticked. The tick is a record, not a removal.
-3. **Carry-over.** When you finish a trip, anything still unticked automatically lands on the *next*
+3. **Carry-over.** When you finish a trip, anything still unticked automatically lands on the _next_
    list for that store, with its lineage preserved. The milk you keep forgetting keeps following you,
    and the database knows how many times it has followed you.
 
@@ -82,19 +82,21 @@ today, and there should not be one until someone asks for the feature.
 **Complete and deployed**, plus **M6**, which added five owner-requested features: batched push
 notifications, trip claims, Turkish and German, private shops, and click-to-copy for the one-time
 password, **M7**, which added permanent store deletion and replaced the shop-settings icon, **M8**,
-which put the visibility control behind a principal and moved the theme onto the account, and **M9**,
-which surfaced item authorship and stopped the claim strip from rendering on a private shop.
+which put the visibility control behind a principal and moved the theme onto the account, **M9**,
+which surfaced item authorship and stopped the claim strip from rendering on a private shop, and
+**M10**, which added recent-item suggestions, duplicate and carry nudges, direct claim release,
+localised offline/PWA metadata, and documentation consistency guards.
 Every milestone through M5 was audited and every blocking finding closed.
 
-| Signal | Value |
-|---|---|
-| **Current version** | **v0.9.1 — 2026-09-03** (`0.9.1`; see `docs/VERSIONS.md` and CONTRACT §11) |
-| Unit/integration tests | **710** (Vitest), green |
-| End-to-end specs | **28** (Playwright, Chromium at 390×844), green |
-| Type check | `npm run check` clean across **536** files |
-| Migrations applied | **004** (`PRAGMA user_version = 4`) |
-| Taps, cold open → first item added | **3** (and 2 for every item after — the add sheet stays open), unchanged by M6, M7, M8 and M9 |
-| Reviewer audits | M1 ×3, M2, M3, M4, **M6** — all closed, findings acted on |
+| Signal                             | Value                                                                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Current version**                | **v0.10 — 2026-09-04** (`0.10.0`; see `docs/VERSIONS.md` and CONTRACT §11)                                                       |
+| Unit/integration tests             | **724** (Vitest; 7 deploy checks skip without the Docker test image), green                                                      |
+| End-to-end specs                   | **31** (Playwright, including setup; Chromium at 390×844), green                                                                 |
+| Type check                         | `npm run check` clean                                                                                                            |
+| Migrations applied                 | **004** (`PRAGMA user_version = 4`)                                                                                              |
+| Taps, cold open → first item added | **3** (and 2 for every non-duplicate item after — the add sheet stays open); an intentional duplicate takes one confirmation tap |
+| Reviewer audits                    | M1 ×3, M2, M3, M4, **M6** — all closed, findings acted on                                                                        |
 
 It is running in production on the owner's home server at `zembil.s3r4.tech`, fronted by a
 **Cloudflare Tunnel** (which terminates TLS at the edge, so the `cloudflared` → origin hop is plain
@@ -102,39 +104,40 @@ It is running in production on the owner's home server at `zembil.s3r4.tech`, fr
 
 ### Milestone history
 
-| Milestone | Content | Outcome |
-|---|---|---|
-| **M0** Foundation | Contract frozen, DDL verified to execute, agent definitions, decision log | ✅ |
-| **M1** Data & domain | Schema, migrations, rollover engine, event bus, `/api/{stores,items,trips}` | ✅ — needed **three** audits |
-| **M2** Auth | scrypt, sessions, origin check, rate limiting, passkeys, admin CRUD, bootstrap | ✅ — audit found an authorization bypass under a green suite |
-| **M3** Frontend | Whole UI, PWA, service worker, SSE client, optimistic tick | ✅ |
-| **M4** Deploy | Dockerfile, compose, entrypoint, healthcheck, backup/restore, README | ✅ |
-| **M5** Hardening | Act on all findings, re-verify the done-means checklist against a rebuilt image | ✅ |
-| **M6** Five features | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password | ✅ — schema delta is migration 002; contract addendum is §8 |
-| **M7** Delete a shop | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been | ✅ — **no migration**; contract addendum is §9 |
-| **M8** Visibility authority, themes, versioning | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side; a version number, shown behind the session | ✅ — **v0.8**; schema delta is migration 004; contract addenda are §10 and §11 |
+| Milestone                                                                | Content                                                                                                                                                                                                                                           | Outcome                                                                                                                                                                                         |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0** Foundation                                                        | Contract frozen, DDL verified to execute, agent definitions, decision log                                                                                                                                                                         | ✅                                                                                                                                                                                              |
+| **M1** Data & domain                                                     | Schema, migrations, rollover engine, event bus, `/api/{stores,items,trips}`                                                                                                                                                                       | ✅ — needed **three** audits                                                                                                                                                                    |
+| **M2** Auth                                                              | scrypt, sessions, origin check, rate limiting, passkeys, admin CRUD, bootstrap                                                                                                                                                                    | ✅ — audit found an authorization bypass under a green suite                                                                                                                                    |
+| **M3** Frontend                                                          | Whole UI, PWA, service worker, SSE client, optimistic tick                                                                                                                                                                                        | ✅                                                                                                                                                                                              |
+| **M4** Deploy                                                            | Dockerfile, compose, entrypoint, healthcheck, backup/restore, README                                                                                                                                                                              | ✅                                                                                                                                                                                              |
+| **M5** Hardening                                                         | Act on all findings, re-verify the done-means checklist against a rebuilt image                                                                                                                                                                   | ✅                                                                                                                                                                                              |
+| **M6** Five features                                                     | Push (batched), trip claims, i18n (en/tr/de), private shops, copy-password                                                                                                                                                                        | ✅ — schema delta is migration 002; contract addendum is §8                                                                                                                                     |
+| **M7** Delete a shop                                                     | `DELETE /api/stores/{id}`, the two-tap confirm, and a cog where a sun had been                                                                                                                                                                    | ✅ — **no migration**; contract addendum is §9                                                                                                                                                  |
+| **M8** Visibility authority, themes, versioning                          | Only a shop's creator or an admin may change who sees it; eight themes on `users.theme`, applied server-side; a version number, shown behind the session                                                                                          | ✅ — **v0.8**; schema delta is migration 004; contract addenda are §10 and §11                                                                                                                  |
 | **M9** Item authorship, a claim strip that knows when nobody's listening | Every item row says who added it and when (`items.createdByName`, already on the wire since migration 001), hidden on a private shop along with the claim strip, which itself no longer renders there, on the list screen or the home-screen card | ✅ — **v0.9.1**; **no migration**; **no contract addendum** — both fields already existed; v0.9.1 (D-050) moved authorship from the detail sheet onto the row itself after the owner tried v0.9 |
+| **M10** Repeat-item assistance and localised offline surfaces            | Recent bought-item suggestions; non-blocking duplicate confirmation; stronger carry nudges; direct claim release; three offline pages and manifests; documentation consistency checks                                                             | ✅ — **v0.10**; **no migration**; contract addendum §12; D-051                                                                                                                                  |
 
 ---
 
 ## 3. Stack, and why each piece
 
-| Layer | Choice | Decision |
-|---|---|---|
-| Framework | SvelteKit 2 / Svelte 5 runes, `adapter-node`, **one process** | D-001 |
-| Database | SQLite (WAL) via the **built-in `node:sqlite`** — no native dependency, no build step | D-002 |
-| Query layer | Hand-written parameterised SQL, numbered forward-only migrations. **No ORM.** | D-003 |
-| Sessions | Opaque 32-byte random tokens, stored SHA-256-hashed. **No signing key exists anywhere.** | D-004 |
-| Passwords | `crypto.scrypt`, N=65536 r=8 p=1, `maxmem` raised to 128 MiB | D-005 |
-| CSRF | `SameSite=Lax` **plus a mandatory `Origin` check** | D-006 |
-| Rate limiting | In-memory continuous-refill token buckets, deliberately **no account lockout** | D-007 |
-| Passkeys | `@simplewebauthn` v13, usernameless (discoverable), always with a password fallback | D-008, D-029 |
-| Realtime | SSE carrying **revalidation hints, not data** | D-011 |
-| Tests | Vitest against a real SQLite *file*; Playwright at 390×844 | D-016 |
-| Push | `web-push` (pure JS), VAPID keypair **generated on first use** into `server_keys` | D-038 |
-| Anti-spam | A trailing per-store quiet window, in memory, with a max-delay clamp | D-039 |
-| i18n | Three typed catalogues and a `t()`. **No library, no build step.** | D-042 |
-| Deploy | One container, one `/data` volume, non-root, loopback-bound | D-012 |
+| Layer         | Choice                                                                                   | Decision     |
+| ------------- | ---------------------------------------------------------------------------------------- | ------------ |
+| Framework     | SvelteKit 2 / Svelte 5 runes, `adapter-node`, **one process**                            | D-001        |
+| Database      | SQLite (WAL) via the **built-in `node:sqlite`** — no native dependency, no build step    | D-002        |
+| Query layer   | Hand-written parameterised SQL, numbered forward-only migrations. **No ORM.**            | D-003        |
+| Sessions      | Opaque 32-byte random tokens, stored SHA-256-hashed. **No signing key exists anywhere.** | D-004        |
+| Passwords     | `crypto.scrypt`, N=65536 r=8 p=1, `maxmem` raised to 128 MiB                             | D-005        |
+| CSRF          | `SameSite=Lax` **plus a mandatory `Origin` check**                                       | D-006        |
+| Rate limiting | In-memory continuous-refill token buckets, deliberately **no account lockout**           | D-007        |
+| Passkeys      | `@simplewebauthn` v13, usernameless (discoverable), always with a password fallback      | D-008, D-029 |
+| Realtime      | SSE carrying **revalidation hints, not data**                                            | D-011        |
+| Tests         | Vitest against a real SQLite _file_; Playwright at 390×844                               | D-016        |
+| Push          | `web-push` (pure JS), VAPID keypair **generated on first use** into `server_keys`        | D-038        |
+| Anti-spam     | A trailing per-store quiet window, in memory, with a max-delay clamp                     | D-039        |
+| i18n          | Three typed catalogues and a `t()`. **No library, no build step.**                       | D-042        |
+| Deploy        | One container, one `/data` volume, non-root, loopback-bound                              | D-012        |
 
 The through-line: **nothing for an operator to provision, no native module to compile, no second
 container, no background process.** The whole system is one Node process, one SQLite file, and a
@@ -178,7 +181,7 @@ stores ──< trips ──< items
 Complete DDL is `docs/CONTRACT.md` §1.1. Read it before writing any SQL. Highlights that catch people
 out:
 
-- **A list *is* a trip.** Exactly one trip per store has `status='open'` at any moment, enforced by
+- **A list _is_ a trip.** Exactly one trip per store has `status='open'` at any moment, enforced by
   the partial unique index `trips_one_open_per_store` — **not** by application code. If you are
   tempted to add an application-level check for this, the index already did it, atomically.
 - **All tables are `STRICT`.** A string written to an INTEGER column is rejected rather than
@@ -190,7 +193,7 @@ out:
 - **Rows come back as null-prototype objects.** `Object.hasOwn(row, k)` works; `row.hasOwnProperty(k)`
   throws.
 - **`username_key` / `name_key` / normalisation is owned by the application,** not by SQLite. `COLLATE
-  NOCASE` only folds ASCII A–Z, which is wrong for Turkish names. Normalisation is NFKC + lowercase
+NOCASE` only folds ASCII A–Z, which is wrong for Turkish names. Normalisation is NFKC + lowercase
   (plus whitespace collapse for store names); the database only enforces uniqueness on the result.
 - **`items.store_id` is denormalised** from `trips.store_id` so the hot list query and the future
   analytics query never need a join. Maintained by the application, asserted by tests (I-3).
@@ -227,7 +230,7 @@ notifications, and the visibility rule), and **R-23 in §9.2** (deleting a store
 at once — no carry-over, no successor trip, no tombstone). Each one maps to at least one test assertion. This is
 the heart of the app; the ones with sharp edges:
 
-- **R-2 — Add targets the store, not the trip.** The server resolves the open trip *inside* the write
+- **R-2 — Add targets the store, not the trip.** The server resolves the open trip _inside_ the write
   transaction. A client that started composing an item before a rollover and submitted after it lands
   on the **new** trip rather than failing. (D-010)
 - **R-4 — Tick is idempotent.** Re-ticking is a success that bumps nothing and emits nothing.
@@ -279,7 +282,7 @@ Complete definitions in `docs/CONTRACT.md` §3. Summary:
 Cross-cutting rules worth knowing before you add an endpoint:
 
 - **§3.0 enumerates write effects per endpoint** — exactly which writes bump `rev` and which events
-  each emits, including that idempotent no-ops bump and emit *nothing*. A test asserts the whole
+  each emits, including that idempotent no-ops bump and emit _nothing_. A test asserts the whole
   table. Add your endpoint to it. (D-021)
 - **§3.1 error envelope**: `{ error: { code, message } }`. Only three responses carry a named sibling
   field: `VERSION_CONFLICT` (+`item`), `TRIP_ALREADY_CLOSED` (+`openTripId`), `STORE_NAME_TAKEN`
@@ -314,7 +317,7 @@ hole. Treat changes here with corresponding care.
   lockout on a family app is a denial-of-service against your own household. Buckets do not survive
   restart (backlog). (D-007)
 - **Passkeys** are usernameless/discoverable (`residentKey: 'required'`) with `attestationType:
-  'none'`, and there is **always** a password fallback: `users.password_hash` is `NOT NULL` (I-10),
+'none'`, and there is **always** a password fallback: `users.password_hash` is `NOT NULL` (I-10),
   so a passkey-only account cannot exist. (D-008, D-029)
 - **`must_change_password` is enforced server-side** — the gate is in the request seam, not the UI.
   (D-027)
@@ -323,7 +326,7 @@ hole. Treat changes here with corresponding care.
 - **There is exactly one application secret, and the app creates it itself.** The VAPID keypair
   (`server_keys`) is generated on first use and never provisioned, so the property that mattered —
   nothing for an operator to create, rotate or leak into a compose file — still holds. State the cost
-  honestly when you touch this: a database disclosure now yields something *usable*, namely the
+  honestly when you touch this: a database disclosure now yields something _usable_, namely the
   ability to send notifications to family devices that already subscribed. It grants no read access
   and no way to sign in. Rotation is `DELETE FROM server_keys WHERE name='vapid'` plus a restart, at
   the price of every member re-enabling notifications once per device. (D-038)
@@ -343,13 +346,13 @@ being an admin does not.** The full table of which endpoint returns which 404 is
    That field normally exists so a client can offer to un-archive; against a private store it is a
    usable id for something the caller must not know exists.
 3. **The refusal has to be observable as a refusal.** The M6 mutation sweep removed the visibility
-   check from `updateStore` and *no status code changed*: the transaction committed the rename, and
+   check from `updateStore` and _no status code changed_: the transaction committed the rename, and
    the closing `getStoreSummary` threw the same 404 on the way out. Every response-shaped assertion
    still passed while a member who could not see a store was renaming it. The tests that kill that
    mutation read the **database**. **A guard on a write is only observable through the write it did
    not perform.**
 
-**M8 added a second, separate question: who may *change* that (§10.1, D-046).** Seeing a list and
+**M8 added a second, separate question: who may _change_ that (§10.1, D-046).** Seeing a list and
 deciding who else may see it are different powers, and until M8 they had the same gate — so any
 member could privatise a shared family shop and, under D-040, leave everybody else unable even to
 find out where it went. `visibility` on `PATCH /api/stores/{id}` now takes only the member named by
@@ -357,7 +360,7 @@ find out where it went. `visibility` on `PATCH /api/stores/{id}` now takes only 
 undo:
 
 1. **§8.4 is resolved first and still wins.** A caller who cannot see the store gets the
-   byte-identical 404, *including an admin*. So the admin exemption only ever applies to a shop the
+   byte-identical 404, _including an admin_. So the admin exemption only ever applies to a shop the
    admin can already see. **D-040 is untouched, and a test asserts the 404 for the admin
    specifically.**
 2. **The check runs inside the transaction and before the name key is recomputed.** Migration 003
@@ -378,7 +381,7 @@ These are recorded because each cost real time and each will bite again:
    must match on `event.route.id`, never on `event.url.pathname`.** `event.route.id` is populated
    before `hooks.handle` runs. (D-037)
 2. **`node:sqlite` never reports the string `SQLITE_CONSTRAINT`.** It sets
-   `err.code = 'ERR_SQLITE_ERROR'` and puts the *extended* result code in `err.errcode`. The only
+   `err.code = 'ERR_SQLITE_ERROR'` and puts the _extended_ result code in `err.errcode`. The only
    reliable constraint test is `(err.errcode & 0xff) === 19`.
 3. **`adapter-node` does not bundle `@simplewebauthn/server` into `build/`.** A runtime image with no
    `node_modules` dies with `ERR_MODULE_NOT_FOUND` before any application code runs. The Dockerfile
@@ -387,7 +390,7 @@ These are recorded because each cost real time and each will bite again:
 ### `ZEMBIL_RP_ID` is a one-way door
 
 It must be the **full hostname** (`zembil.example.com`), never the registrable domain
-(`example.com`). An rpID is a scope: a credential scoped to `example.com` may be requested by *any*
+(`example.com`). An rpID is a scope: a credential scoped to `example.com` may be requested by _any_
 page under `*.example.com`, which on a home server hosting sibling subdomains hands each of them the
 ability to log in as a family member. And changing rpID later **invalidates every existing passkey**,
 because authenticators key by rpID. Startup asserts the value is the hostname of `ZEMBIL_ORIGIN` or a
@@ -434,15 +437,15 @@ The rules that are not negotiable because they come from the brief, not from tas
   and not `<html>`. Read `messages()` inside `$derived`, never into a module-level `$state` — that
   singleton is shared across concurrent SSR requests and would serve one member's language to
   another.
-- Colour tokens live on `:root`, overridden under `[data-theme="…"]` *and* under
+- Colour tokens live on `:root`, overridden under `[data-theme="…"]` _and_ under
   `@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme]), :root[data-theme="auto"]`,
   so the Theme control wins in both directions. **M8 made that guard name `auto` explicitly**: with
   eight themes, "no attribute" can no longer stand in for "follow the OS", or `sepia` gets repainted
   dark after sunset.
 - **The theme is on the account (`users.theme`), not the device**, and reaches `<html data-theme>`
   during SSR the same way the locale reaches `<html lang>`. That is what closed the theme flash §13
-  used to list. `auto` is a *value* that gets written onto the element, not an absent attribute.
-- **`stores.color` is a palette *key*, never a hex value.** This keeps the value off the CSS path and
+  used to list. `auto` is a _value_ that gets written onto the element, not an absent attribute.
+- **`stores.color` is a palette _key_, never a hex value.** This keeps the value off the CSS path and
   lets the dark theme remap it.
 
 Screens: `/login`, `/` (Shops), `/s/{storeId}` (List), `/trips` (History), `/you` (Account),
@@ -450,7 +453,9 @@ Screens: `/login`, `/` (Shops), `/s/{storeId}` (List), `/trips` (History), `/you
 claim sheet and claim strip on the list, the shop-settings sheet behind the gear in the list header
 (rename, recolour, visibility, archive, and — from M7 — delete), the archived-shops sheet on the home
 screen (where each row can also be deleted), and the Notifications and Language sections on the
-account screen. `docs/DESIGN.md` §4 lists them with the
+account screen. M10 adds recent-item chips and duplicate confirmation to both quick-add sheets,
+promotes claim release onto the strip, and strengthens repeated carry-over in the row and finish
+sheet. `docs/DESIGN.md` §4 lists them with the
 copy each one uses.
 
 ### Service worker
@@ -461,9 +466,14 @@ IndexedDB outbox and is in the backlog.
 
 M6 added `push` and `notificationclick` handlers and changed none of that: they render a payload the
 server already encrypted for this browser and open a URL, writing nothing to the cache. The `push`
-handler always shows *something*, even for a payload it cannot parse — every browser that implements
+handler always shows _something_, even for a payload it cannot parse — every browser that implements
 push requires `userVisibleOnly`, and silently swallowing one is how a site loses its push permission
 wholesale.
+
+M10 precaches three public offline pages. The signed-in shell tells the worker only the member's
+closed-set locale (`en`, `tr` or `de`), which selects the fallback page; no rendered authenticated
+document or shopping data enters Cache Storage. The same locale selects one of three public manifests
+in the server-side HTML transform, before first paint.
 
 ---
 
@@ -495,7 +505,7 @@ Reverse proxies must not buffer `text/event-stream` — the README's nginx block
 ## 10. Deployment and operations
 
 One service, one volume, non-root, loopback-bound. `docs/CONTRACT.md` §3.8 pins the deployment seam
-(health, bootstrap, shutdown) — it was frozen *before* M2 and M4 ran in parallel, which is the only
+(health, bootstrap, shutdown) — it was frozen _before_ M2 and M4 ran in parallel, which is the only
 reason they could run in parallel (D-031).
 
 - **`docker compose up -d --build`.** Compose refuses to start without `ZEMBIL_ORIGIN`, on purpose.
@@ -522,24 +532,24 @@ disagree — measure before quoting either.
 `ZEMBIL_ORIGIN` is the **only** required variable. Every other default in `.env.example` is already
 the production-correct value; the file ships with exactly one uncommented line by design.
 
-| Name | Default | Note |
-|---|---|---|
-| `ZEMBIL_ORIGIN` | — | **Required.** Scheme + host, no trailing slash. |
-| `ZEMBIL_RP_ID` | hostname of origin | Leave unset. See §7. |
-| `ZEMBIL_RP_NAME` | `Zembil` | Cosmetic — the name in the OS passkey prompt. |
-| `ZEMBIL_DATA_DIR` | `/data` | |
-| `ZEMBIL_TRUST_PROXY` | `1` | Trusted `X-Forwarded-For` hops. `0` disables header trust. |
-| `ZEMBIL_BOOTSTRAP_ADMIN_USERNAME` | `admin` | Only when the users table is empty. |
-| `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD` | generated | **Leave unset** — a set value is a credential living in a file. |
-| `ZEMBIL_SESSION_IDLE_DAYS` | `30` | |
-| `ZEMBIL_SESSION_ABSOLUTE_DAYS` | `180` | |
-| `ZEMBIL_LOG_LEVEL` | `info` | **Parsed, validated, and read by nothing.** See §13. |
-| `ZEMBIL_SYNCHRONOUS` | `NORMAL` | `FULL` only if the machine is on a UPS. |
-| `ZEMBIL_HOST_PORT` | `3000` | |
-| `ZEMBIL_PUSH_ENABLED` | `true` | M6. `0`/`false`/`no` turns push off; nothing else does. |
-| `ZEMBIL_VAPID_SUBJECT` | origin, when https | M6. `mailto:` or `https:`. `null` on a plain-http origin — see §8.11. |
-| `ZEMBIL_NOTIFY_QUIET_MINUTES` | `5` | M6. R-21's quiet window. `0` notifies immediately. |
-| `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES` | `30` | M6. The ceiling on it. Must be ≥ the window. |
+| Name                              | Default            | Note                                                                  |
+| --------------------------------- | ------------------ | --------------------------------------------------------------------- |
+| `ZEMBIL_ORIGIN`                   | —                  | **Required.** Scheme + host, no trailing slash.                       |
+| `ZEMBIL_RP_ID`                    | hostname of origin | Leave unset. See §7.                                                  |
+| `ZEMBIL_RP_NAME`                  | `Zembil`           | Cosmetic — the name in the OS passkey prompt.                         |
+| `ZEMBIL_DATA_DIR`                 | `/data`            |                                                                       |
+| `ZEMBIL_TRUST_PROXY`              | `1`                | Trusted `X-Forwarded-For` hops. `0` disables header trust.            |
+| `ZEMBIL_BOOTSTRAP_ADMIN_USERNAME` | `admin`            | Only when the users table is empty.                                   |
+| `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD` | generated          | **Leave unset** — a set value is a credential living in a file.       |
+| `ZEMBIL_SESSION_IDLE_DAYS`        | `30`               |                                                                       |
+| `ZEMBIL_SESSION_ABSOLUTE_DAYS`    | `180`              |                                                                       |
+| `ZEMBIL_LOG_LEVEL`                | `info`             | **Parsed, validated, and read by nothing.** See §13.                  |
+| `ZEMBIL_SYNCHRONOUS`              | `NORMAL`           | `FULL` only if the machine is on a UPS.                               |
+| `ZEMBIL_HOST_PORT`                | `3000`             |                                                                       |
+| `ZEMBIL_PUSH_ENABLED`             | `true`             | M6. `0`/`false`/`no` turns push off; nothing else does.               |
+| `ZEMBIL_VAPID_SUBJECT`            | origin, when https | M6. `mailto:` or `https:`. `null` on a plain-http origin — see §8.11. |
+| `ZEMBIL_NOTIFY_QUIET_MINUTES`     | `5`                | M6. R-21's quiet window. `0` notifies immediately.                    |
+| `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES` | `30`               | M6. The ceiling on it. Must be ≥ the window.                          |
 
 ---
 
@@ -617,7 +627,7 @@ seams that are left to convention drift.)
   implementation while proving which primitive was called.
 
 - **The reviewer is not a formality.** D-036 and D-037 record why: it finds the class of defect a
-  mutation sweep provably cannot, because a sweep can only break code that *exists*, and it is the
+  mutation sweep provably cannot, because a sweep can only break code that _exists_, and it is the
   only pass in this process not run by whoever wrote the code. The M2 audit is the proof — an
   authorization bypass, in the most security-sensitive milestone, under a fully green suite.
 
@@ -625,17 +635,17 @@ seams that are left to convention drift.)
 
 ## 12. Document map
 
-| File | What it is | Authority |
-|---|---|---|
-| `docs/CONTRACT.md` | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — **plus §8, the M6 addendum** (migration 002, I-14…I-18, R-18…R-22, the visibility rule, claims, locale, push, the §3.0 delta), **§9, the M7 addendum** (`DELETE /api/stores/{id}`, R-23, the §3.0 delta, and the confirmation rule that lives in the UI) **and §10, the M8 addendum** (§8.4a — who may change visibility; migration 004 and `users.theme`; I-19; the `PATCH /api/me` delta). | Normative. Build against this. |
-| `docs/DECISIONS.md` | D-001 … **D-047**, each with the reasoning and what was rejected. | Why things are the way they are. |
-| `PLAN.md` | Stack, data model at a glance, file ownership, milestones with exit criteria, test strategy, known gaps. | Process record. |
-| `docs/DESIGN.md` | Colour tokens, type scale, metrics, screen list, layout rules — **and §6, the language rules** (why Turkish supplies one plural form, why no suffix is ever glued to a shop name, why German uses "Sie", and why a server error message is never translated by the client). | Distilled from the canvas. |
-| `design/Zembil.dc.html` | 22 artboards at 390×844. | **Visual source of truth** — beats `DESIGN.md`. |
-| `docs/BACKLOG.md` | Everything deliberately not built, with the reason. | Append here instead of building. |
-| `README.md` | Operator documentation: deploy, reverse proxy (Caddy/nginx/Traefik), bootstrap, accounts, passkeys, backup, restore, recovery, configuration. | For humans running it. |
-| `docs/VERSIONS.md` | The release log, newest first, one entry per version. Its top heading is asserted against `src/lib/version.ts` by a test. | What shipped when. |
-| `PROJECT.md` | This file. | Orientation — **and the handover. Keep it current; see the box at the top.** |
+| File                    | What it is                                                                                                                                                                                                                                                                                                | Authority                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `docs/CONTRACT.md`      | **FROZEN.** Complete DDL, invariants, rollover rules R-1…R-17, full API, error envelope, validation rules, session/cookie contract, security headers, SSE, deployment seam, env vars, shared types — plus addenda §8…§12 through M10. §12 defines recent suggestions and localised public offline assets. | Normative. Build against this.                                               |
+| `docs/DECISIONS.md`     | D-001 … **D-051**, each with the reasoning and what was rejected.                                                                                                                                                                                                                                         | Why things are the way they are.                                             |
+| `PLAN.md`               | Stack, data model at a glance, file ownership, milestones with exit criteria, test strategy, known gaps.                                                                                                                                                                                                  | Process record.                                                              |
+| `docs/DESIGN.md`        | Colour tokens, type scale, metrics, screen list, layout rules — **and §6, the language rules** (why Turkish supplies one plural form, why no suffix is ever glued to a shop name, why German uses "Sie", and why a server error message is never translated by the client).                               | Distilled from the canvas.                                                   |
+| `design/Zembil.dc.html` | 22 artboards at 390×844.                                                                                                                                                                                                                                                                                  | **Visual source of truth** — beats `DESIGN.md`.                              |
+| `docs/BACKLOG.md`       | Everything deliberately not built, with the reason.                                                                                                                                                                                                                                                       | Append here instead of building.                                             |
+| `README.md`             | Operator documentation: deploy, reverse proxy (Caddy/nginx/Traefik), bootstrap, accounts, passkeys, backup, restore, recovery, configuration.                                                                                                                                                             | For humans running it.                                                       |
+| `docs/VERSIONS.md`      | The release log, newest first, one entry per version. Its top heading is asserted against `src/lib/version.ts` by a test.                                                                                                                                                                                 | What shipped when.                                                           |
+| `PROJECT.md`            | This file.                                                                                                                                                                                                                                                                                                | Orientation — **and the handover. Keep it current; see the box at the top.** |
 
 ---
 
@@ -644,7 +654,7 @@ seams that are left to convention drift.)
 Read this section before you trust a claim made elsewhere in the docs.
 
 - **The version is hand-bumped, and nothing enforces that you did it.** `src/lib/version.ts`,
-  `package.json` and `docs/VERSIONS.md` are asserted against *each other* by
+  `package.json` and `docs/VERSIONS.md` are asserted against _each other_ by
   `tests/client/version.test.ts`, so they cannot drift apart — but nothing detects a milestone that
   shipped without bumping any of the three, because there is nothing to compare them to. A CI check
   against the tag or the branch's commit count would close it; on a one-deployment project the
@@ -681,7 +691,7 @@ Read this section before you trust a claim made elsewhere in the docs.
 - **The README documents Caddy, nginx and Traefik but not Cloudflare Tunnel**, which is what the live
   deployment actually uses. The shape that works: the tunnel service target is
   **`http://localhost:3000`** — plain HTTP, because Cloudflare terminates TLS at the edge — while
-  `ZEMBIL_ORIGIN` stays `https://…` because it describes what the *browser* sees. A tunnel is also
+  `ZEMBIL_ORIGIN` stays `https://…` because it describes what the _browser_ sees. A tunnel is also
   potentially a second proxy hop, so `ZEMBIL_TRUST_PROXY=1` may be wrong for it; the failure mode
   either way is a **shared rate-limit bucket, not an auth bypass**, so it is worth measuring rather
   than guessing.
@@ -696,12 +706,11 @@ Read this section before you trust a claim made elsewhere in the docs.
   restarting when the holder edits their note. Declined deliberately, with reasons in D-044: the
   foreign-store `tripId` 409, which the frozen §2 mandates. Two carve-outs are now named in I-18 rather
   than left as a false absolute. **The most useful finding was a test gap, not a code defect**: §8.9's
-  *Notifies* column had no coverage at all, so deleting `noteItemAdded` from the domain layer left the
+  _Notifies_ column had no coverage at all, so deleting `noteItemAdded` from the domain layer left the
   suite green and push silently never fired again. `tests/domain/notify-effects.test.ts` closes it.
-- **`static/offline.html` and the PWA manifest are English only.** Everything rendered by the app is
-  translated; these two are not, because the service worker that serves the offline page has no idea
-  who is signed in — the locale is on the server, and the page exists for the case where the server
-  cannot be reached. See `BACKLOG.md`.
+- ~~**The offline page and PWA manifest are English only.**~~ **Closed in M10** (D-051): three public
+  static pages and manifests ship, the HTML transform selects the manifest, and the signed-in shell
+  gives the worker only the closed-set locale used to select an offline fallback.
 - **Notification batches do not survive a restart.** In memory, like the rate-limit buckets. A restart
   inside a quiet window drops that batch; the next add arms a new one.
 - **Push has never been delivered to a real device.** The whole path is tested against a real database
@@ -741,7 +750,7 @@ Read this section before you trust a claim made elsewhere in the docs.
 ### While you write
 
 - Match the surrounding code. It is hand-written parameterised SQL, small modules, and comments that
-  explain *why* rather than *what*.
+  explain _why_ rather than _what_.
 - If you add a write endpoint, add it to the §3.0 effects table and to the test that asserts that
   table.
 - If you add a rollover behaviour, give it an R-number in the contract.
@@ -751,7 +760,7 @@ Read this section before you trust a claim made elsewhere in the docs.
 
 ### Before you call it done
 
-- `npm test` (Vitest, 710) and `npm run test:e2e` (Playwright, 27) green. **Build before the e2e
+- `npm test` (Vitest, 724) and `npm run test:e2e` (Playwright, 31) green. **Build before the e2e
   run** — `test:e2e` serves `build/index.js` and does not rebuild it, so a stale build silently tests
   the previous commit.
 - `npm run check` clean.
@@ -778,10 +787,10 @@ Read this section before you trust a claim made elsewhere in the docs.
 7. **"Add all again" from a past trip.** The most-wanted deferred feature from the design canvas, and
    cheap on the existing model.
 
-*(The store-edit UI that used to sit at position 5 was built in M6 — D-043 explains why it came along
+_(The store-edit UI that used to sit at position 5 was built in M6 — D-043 explains why it came along
 with store visibility rather than waiting its turn. Nothing on the list above was consumed by M8:
 its three changes were owner-requested and arrived out of band, which is normal for this project and
-is why the queue is a queue and not a plan.)*
+is why the queue is a queue and not a plan.)_
 
 ### Things not to do
 

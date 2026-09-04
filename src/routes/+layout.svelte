@@ -1,10 +1,10 @@
 <script lang="ts">
 	import '../app.css';
 	import { applyTheme, asTheme } from '$lib/client/theme';
+	import { PWA_DESCRIPTIONS } from '$lib/pwa';
 	import type { Snippet } from 'svelte';
 
-	let { children, data }: { children: Snippet; data: { locale: string; theme: string } } =
-		$props();
+	let { children, data }: { children: Snippet; data: { locale: string; theme: string } } = $props();
 
 	// The theme is already on <html> when this document arrives — the server put
 	// it there (§10.1), which is what removed the old one-frame flash. This
@@ -24,6 +24,23 @@
 	// session.
 	$effect(() => {
 		document.documentElement.lang = data.locale;
+		document
+			.querySelector<HTMLLinkElement>('#zembil-manifest')
+			?.setAttribute('href', `/manifest-${data.locale}.webmanifest`);
+		document
+			.querySelector<HTMLMetaElement>('#zembil-description')
+			?.setAttribute('content', PWA_DESCRIPTIONS[data.locale as keyof typeof PWA_DESCRIPTIONS]);
+		// CONTRACT §12.3: only this closed-set preference enters the worker cache.
+		// It chooses among three public static offline pages; no rendered document,
+		// session fact or shopping data is ever sent or cached.
+		if ('serviceWorker' in navigator) {
+			void navigator.serviceWorker.ready.then((registration) => {
+				registration.active?.postMessage({
+					type: 'locale.changed',
+					locale: data.locale
+				});
+			});
+		}
 	});
 </script>
 

@@ -41,7 +41,8 @@ export const de: Messages = {
 	homeTitle: 'Läden',
 	homeAccount: 'Ihr Konto',
 	homeEmptyTitle: 'Noch keine Läden',
-	homeEmptyBody: 'Legen Sie einen an — alles, was Sie dort brauchen, steht auf seiner eigenen Liste.',
+	homeEmptyBody:
+		'Legen Sie einen an — alles, was Sie dort brauchen, steht auf seiner eigenen Liste.',
 	homeAddShop: '+ Laden hinzufügen',
 	homeAddItem: 'Etwas hinzufügen',
 	homeGone: 'Dieser Laden ist nicht mehr für Sie freigegeben.',
@@ -71,6 +72,9 @@ export const de: Messages = {
 	addBusy: 'Wird hinzugefügt…',
 	addAdded: (name: string) => `„${name}“ hinzugefügt. Noch etwas?`,
 	addShopLegend: 'Laden',
+	addRecent: 'Kürzlich hier gekauft',
+	addDuplicate: (name: string) => `„${name}“ steht bereits auf dieser Liste.`,
+	addDuplicateAnyway: 'Trotzdem noch einmal hinzufügen',
 
 	// ---- new shop -------------------------------------------------------
 	newShopTitle: 'Laden hinzufügen',
@@ -107,6 +111,11 @@ export const de: Messages = {
 	rowEdit: (name: string) => `${name} bearbeiten`,
 	rowCarried: (n: number) =>
 		plural(L, n, { one: `${n}-mal übernommen`, other: `${n}-mal übernommen` }),
+	rowCarriedNudge: (n: number) =>
+		plural(L, n, {
+			one: `Nach ${n} Einkauf noch benötigt`,
+			other: `Nach ${n} Einkäufen noch benötigt`
+		}),
 
 	finishTitle: 'Diesen Einkauf beenden?',
 	finishBought: (n: number) =>
@@ -117,6 +126,11 @@ export const de: Messages = {
 			other: `${n} Sachen bleiben auf der Liste und wandern auf den nächsten Einkauf hier.`
 		}),
 	finishNothingLeft: 'Es bleibt nichts übrig.',
+	finishCarriedAgain: (n: number) =>
+		plural(L, n, {
+			one: `${n} davon wurde schon einmal übernommen.`,
+			other: `${n} davon wurden schon einmal übernommen.`
+		}),
 	finishConfirm: 'Einkauf beenden',
 	finishBusy: 'Wird beendet…',
 	finishKeep: 'Weiter einkaufen',
@@ -185,9 +199,15 @@ export const de: Messages = {
 	tripShoppedBy: (name: string) => `eingekauft von ${name}`,
 	tripBought: (n: number) => plural(L, n, { one: `${n} gekauft`, other: `${n} gekauft` }),
 	tripLeft: (n: number) =>
-		plural(L, n, { one: `${n} blieb auf der Liste`, other: `${n} blieben auf der Liste` }),
+		plural(L, n, {
+			one: `${n} blieb auf der Liste`,
+			other: `${n} blieben auf der Liste`
+		}),
 	tripSeeItems: (n: number) =>
-		plural(L, n, { one: `${n} Artikel ansehen`, other: `${n} Artikel ansehen` }),
+		plural(L, n, {
+			one: `${n} Artikel ansehen`,
+			other: `${n} Artikel ansehen`
+		}),
 	tripHideItems: 'Artikel ausblenden',
 	tripItemLeft: 'übrig',
 
@@ -227,8 +247,7 @@ export const de: Messages = {
 
 	// ---- push (§8.7) ----------------------------------------------------
 	pushTitle: 'Benachrichtigungen',
-	pushBody:
-		'Ein Hinweis auf diesem Gerät, wenn jemand etwas auf eine geteilte Liste schreibt.',
+	pushBody: 'Ein Hinweis auf diesem Gerät, wenn jemand etwas auf eine geteilte Liste schreibt.',
 	pushEnable: 'Auf diesem Gerät einschalten',
 	pushDisable: 'Auf diesem Gerät ausschalten',
 	pushOn: 'Auf diesem Gerät eingeschaltet.',
@@ -253,7 +272,10 @@ export const de: Messages = {
 	adminDisabled: (when: string) => `Deaktiviert ${when}`,
 	adminPasswordOnly: 'Aktiv · nur Passwort',
 	adminPasskeys: (n: number) =>
-		plural(L, n, { one: `Aktiv · ${n} Passkey`, other: `Aktiv · ${n} Passkeys` }),
+		plural(L, n, {
+			one: `Aktiv · ${n} Passkey`,
+			other: `Aktiv · ${n} Passkeys`
+		}),
 	adminReset: 'Passwort zurücksetzen',
 	adminRemovePasskeys: 'Passkeys entfernen',
 	adminMakeAdmin: 'Zum Admin machen',
@@ -293,8 +315,7 @@ export const de: Messages = {
 	pwCurrent: 'Vorläufiges Passwort',
 	pwNew: 'Neues Passwort',
 	pwRepeat: 'Neues Passwort wiederholen',
-	pwMore: (n: number) =>
-		plural(L, n, { one: `noch ${n} Zeichen.`, other: `noch ${n} Zeichen.` }),
+	pwMore: (n: number) => plural(L, n, { one: `noch ${n} Zeichen.`, other: `noch ${n} Zeichen.` }),
 	pwMismatch: 'Die beiden stimmen nicht überein.',
 	pwSubmit: 'Speichern und weiter',
 

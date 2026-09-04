@@ -253,7 +253,7 @@ CREATE INDEX items_origin             ON items (origin_item_id);
 ### 1.1a `node:sqlite` binding rules (measured, not recalled)
 
 - **JavaScript booleans cannot be bound.** `stmt.run(true)` throws
-  *"Provided value cannot be bound to SQLite parameter"*. Every boolean must be converted to `1`/`0`
+  _"Provided value cannot be bound to SQLite parameter"_. Every boolean must be converted to `1`/`0`
   at the repository boundary. This is the single most likely source of a runtime error in the data
   layer, and it fails at the first call rather than silently.
 - Rows come back as **null-prototype objects**. `Object.hasOwn(row, k)` works; `row.hasOwnProperty(k)`
@@ -267,21 +267,21 @@ CREATE INDEX items_origin             ON items (origin_item_id);
 
 Each of these is a testable assertion. The reviewer checks that a test exists for each.
 
-| # | Invariant |
-|---|---|
-| I-1 | Every non-archived store has exactly **one** trip with `status='open'`. Enforced by `trips_one_open_per_store`. |
-| I-2 | `trips.seq` is contiguous from 1 per store. A gap means a bug in close. |
-| I-3 | `items.store_id` always equals `trips.store_id` for the item's `trip_id`. |
-| I-4 | An item with `state='ticked'` has both `ticked_at` and `ticked_by` set. |
-| I-5 | An item with `state='carried'` has `carried_to_item_id` set, `ticked_at` NULL, and belongs to a **closed** trip. |
-| I-6 | `origin_item_id` equals `id` for an item that was never carried into, otherwise the root of the chain. It is never NULL. |
-| I-7 | `carry_count` equals the length of the `carried_from_item_id` chain back to `origin_item_id`. |
-| I-8 | A soft-deleted item (`deleted_at` non-NULL) is never carried and never appears in any list response. |
-| I-9 | `sessions.id` is never equal to any value that was ever sent to a client. |
-| I-10 | `users.password_hash` is never NULL — a passkey-only account must still have a fallback credential. |
+| #    | Invariant                                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| I-1  | Every non-archived store has exactly **one** trip with `status='open'`. Enforced by `trips_one_open_per_store`.                          |
+| I-2  | `trips.seq` is contiguous from 1 per store. A gap means a bug in close.                                                                  |
+| I-3  | `items.store_id` always equals `trips.store_id` for the item's `trip_id`.                                                                |
+| I-4  | An item with `state='ticked'` has both `ticked_at` and `ticked_by` set.                                                                  |
+| I-5  | An item with `state='carried'` has `carried_to_item_id` set, `ticked_at` NULL, and belongs to a **closed** trip.                         |
+| I-6  | `origin_item_id` equals `id` for an item that was never carried into, otherwise the root of the chain. It is never NULL.                 |
+| I-7  | `carry_count` equals the length of the `carried_from_item_id` chain back to `origin_item_id`.                                            |
+| I-8  | A soft-deleted item (`deleted_at` non-NULL) is never carried and never appears in any list response.                                     |
+| I-9  | `sessions.id` is never equal to any value that was ever sent to a client.                                                                |
+| I-10 | `users.password_hash` is never NULL — a passkey-only account must still have a fallback credential.                                      |
 | I-11 | At most **one** live row (`state <> 'carried'`, `deleted_at IS NULL`) exists per `(store_id, client_id)`. Enforced by `items_client_id`. |
-| I-12 | Within one trip, `sort_order` is unique across non-deleted items. Allocation is `MAX+1000` per R-15, and nothing else writes it. |
-| I-13 | `stores.rev` is strictly increasing per store and is bumped by exactly the writes listed in §3.0. |
+| I-12 | Within one trip, `sort_order` is unique across non-deleted items. Allocation is `MAX+1000` per R-15, and nothing else writes it.         |
+| I-13 | `stores.rev` is strictly increasing per store and is bumped by exactly the writes listed in §3.0.                                        |
 
 **Which of these the schema enforces, and which only tests do.** The distinction is normative — an
 invariant nobody enforces is a comment.
@@ -367,17 +367,18 @@ inside `BEGIN IMMEDIATE … COMMIT`, in this order:
    two-statement order works. Measured on Node 26.1.0 / SQLite 3.53.0 against the §1.1 DDL with
    `foreign_keys=ON`:
 
-   | Sequence | Result |
-   |---|---|
-   | update original to `carried` first, then insert clone | `FOREIGN KEY constraint failed` — the clone does not exist yet |
-   | insert clone first, then update original | `UNIQUE constraint failed: items.store_id, items.client_id` |
-   | insert clone with `client_id=NULL`, update original, then set the clone's `client_id` | **commits** |
+   | Sequence                                                                              | Result                                                         |
+   | ------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+   | update original to `carried` first, then insert clone                                 | `FOREIGN KEY constraint failed` — the clone does not exist yet |
+   | insert clone first, then update original                                              | `UNIQUE constraint failed: items.store_id, items.client_id`    |
+   | insert clone with `client_id=NULL`, update original, then set the clone's `client_id` | **commits**                                                    |
 
    The three-statement form is the one to implement. It is preferred over declaring the FK
    `DEFERRABLE INITIALLY DEFERRED` because deferring it would suspend that check for every
    transaction in the application to buy one saved `UPDATE` on a path that runs once per shopping
    trip. A test asserts that both two-statement orders raise `SQLITE_CONSTRAINT`, so this cannot
    quietly regress into a scheme that happens to work only because a constraint was dropped.
+
 6. Bump `stores.rev`.
 7. `COMMIT`, then emit one `store.changed` event carrying the new `rev`.
 
@@ -398,7 +399,7 @@ re-adding it is one tap from the history screen. This is a deliberate boundary, 
 **not** carried. Deleting is idempotent — deleting an already-deleted item returns success.
 
 Where R-10 meets R-8 and R-14, **idempotency wins**: deleting an already-deleted item returns `200`
-even if its trip has since closed or its store has been archived, where a *first* delete would return
+even if its trip has since closed or its store has been archived, where a _first_ delete would return
 `409`. The rules genuinely conflict and the code must not be left to pick silently. This precedence is
 the right one because the alternative punishes a client for a retry it could not know was
 unnecessary — the delete already happened, nothing is written, no `rev` is bumped and no event is
@@ -484,24 +485,24 @@ Normative. A write not listed here bumps nothing and emits nothing. Every listed
 response — see the last column. An endpoint that returns `200` because nothing actually changed
 (R-4, R-5, R-10 idempotent repeats) must **not** bump `rev` and must **not** emit.
 
-| Endpoint | Bumps | Emits | Notes |
-|---|---|---|---|
-| `POST /api/stores` | — | `stores.changed` | New store; there is no prior `rev` to bump. |
-| `PATCH /api/stores/{id}` (name, color, sortOrder, archived) | `stores.rev` | `stores.changed` **and** `store.changed` | The header on the list screen shows the name and colour. |
-| `POST /api/stores/{id}/items` (**new** row) | `stores.rev` | `store.changed` | |
-| `POST /api/stores/{id}/items` (idempotent hit, R-17) | — | — | Nothing changed. |
-| `PATCH /api/items/{id}` | `stores.rev` | `store.changed` | |
-| `DELETE /api/items/{id}` (first delete) | `stores.rev` | `store.changed` | |
-| `DELETE /api/items/{id}` (already deleted) | — | — | |
-| `POST /api/items/{id}/tick` (state changed) | `stores.rev` | `store.changed` | |
-| `POST /api/items/{id}/tick` (already ticked, R-4) | — | — | |
-| `POST /api/items/{id}/untick` (state changed) | `stores.rev` | `store.changed` | |
-| `POST /api/items/{id}/untick` (already pending, R-5) | — | — | |
-| `POST /api/stores/{id}/trips/close` | `stores.rev` | `store.changed` **and** `stores.changed` | The home screen's counts and `openTripId` both change. |
-| `POST /api/admin/users` | — | — | No shopping state changed. |
-| `PATCH /api/admin/users/{id}` with `isActive:false` | — | `session.revoked` **to that user's streams only** | Then the streams are closed. |
-| `POST /api/admin/users/{id}/reset-password` | — | `session.revoked` to that user's streams only | |
-| `POST /api/auth/logout` | — | — | The client already knows. |
+| Endpoint                                                    | Bumps        | Emits                                             | Notes                                                    |
+| ----------------------------------------------------------- | ------------ | ------------------------------------------------- | -------------------------------------------------------- |
+| `POST /api/stores`                                          | —            | `stores.changed`                                  | New store; there is no prior `rev` to bump.              |
+| `PATCH /api/stores/{id}` (name, color, sortOrder, archived) | `stores.rev` | `stores.changed` **and** `store.changed`          | The header on the list screen shows the name and colour. |
+| `POST /api/stores/{id}/items` (**new** row)                 | `stores.rev` | `store.changed`                                   |                                                          |
+| `POST /api/stores/{id}/items` (idempotent hit, R-17)        | —            | —                                                 | Nothing changed.                                         |
+| `PATCH /api/items/{id}`                                     | `stores.rev` | `store.changed`                                   |                                                          |
+| `DELETE /api/items/{id}` (first delete)                     | `stores.rev` | `store.changed`                                   |                                                          |
+| `DELETE /api/items/{id}` (already deleted)                  | —            | —                                                 |                                                          |
+| `POST /api/items/{id}/tick` (state changed)                 | `stores.rev` | `store.changed`                                   |                                                          |
+| `POST /api/items/{id}/tick` (already ticked, R-4)           | —            | —                                                 |                                                          |
+| `POST /api/items/{id}/untick` (state changed)               | `stores.rev` | `store.changed`                                   |                                                          |
+| `POST /api/items/{id}/untick` (already pending, R-5)        | —            | —                                                 |                                                          |
+| `POST /api/stores/{id}/trips/close`                         | `stores.rev` | `store.changed` **and** `stores.changed`          | The home screen's counts and `openTripId` both change.   |
+| `POST /api/admin/users`                                     | —            | —                                                 | No shopping state changed.                               |
+| `PATCH /api/admin/users/{id}` with `isActive:false`         | —            | `session.revoked` **to that user's streams only** | Then the streams are closed.                             |
+| `POST /api/admin/users/{id}/reset-password`                 | —            | `session.revoked` to that user's streams only     |                                                          |
+| `POST /api/auth/logout`                                     | —            | —                                                 | The client already knows.                                |
 
 `store.changed` always carries the post-commit `stores.rev`. The two store-level events are separate
 because they invalidate different screens: `stores.changed` invalidates the home list, `store.changed`
@@ -522,7 +523,7 @@ Every non-2xx response carries an `error` object of exactly this shape:
 VERSION_CONFLICT` adds `item: Item`, `409 TRIP_ALREADY_CLOSED` adds `openTripId: string`, and `409
 STORE_NAME_TAKEN` adds `storeId: string`. Each exists so the client can recover without a second
 round trip, and all three are typed in §7. No other
-error response adds anything, and no error response ever nests recovery data *inside* `error`.
+error response adds anything, and no error response ever nests recovery data _inside_ `error`.
 
 **The request body of any mutating endpoint must be a JSON object.** A body that parses as valid
 JSON but is `null`, an array, a string or a number is `400 VALIDATION_FAILED` with the message
@@ -547,25 +548,25 @@ Normative for every string field in every request body. Applied **before** any d
 `CHECK` constraint is never the thing that rejects user input — a constraint violation surfacing to a
 user is a `500`, and a `500` on a 250-character paste into the add sheet is a defect, not validation.
 
-| Field | Endpoint | Rule |
-|---|---|---|
-| item `name` | `POST /items`, `PATCH /items/{id}` | trim; 1–200 chars after trimming |
-| item `note` | same | trim; `null` or empty-after-trim is stored as `NULL`; max 500 |
-| store `name` | `POST /stores`, `PATCH /stores/{id}` | trim; 1–60; **no control characters** (added by M6 — see §8.4a) |
-| passkey `label` | `passkey/register/verify` | trim; 1–64 |
-| `username` | `POST /admin/users` | trim; 1–32; `[a-z0-9._-]+` after lowercasing; `username_key` is the lowercased form |
-| `displayName` | `POST`/`PATCH /admin/users` | trim; 1–60 |
-| `password` / `newPassword` | login, password change | **not** trimmed — leading and trailing spaces are part of the secret; 12–256 |
-| `clientId` | `POST /items` | must parse as a UUID; rejected otherwise |
+| Field                      | Endpoint                             | Rule                                                                                |
+| -------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| item `name`                | `POST /items`, `PATCH /items/{id}`   | trim; 1–200 chars after trimming                                                    |
+| item `note`                | same                                 | trim; `null` or empty-after-trim is stored as `NULL`; max 500                       |
+| store `name`               | `POST /stores`, `PATCH /stores/{id}` | trim; 1–60; **no control characters** (added by M6 — see §8.4a)                     |
+| passkey `label`            | `passkey/register/verify`            | trim; 1–64                                                                          |
+| `username`                 | `POST /admin/users`                  | trim; 1–32; `[a-z0-9._-]+` after lowercasing; `username_key` is the lowercased form |
+| `displayName`              | `POST`/`PATCH /admin/users`          | trim; 1–60                                                                          |
+| `password` / `newPassword` | login, password change               | **not** trimmed — leading and trailing spaces are part of the secret; 12–256        |
+| `clientId`                 | `POST /items`                        | must parse as a UUID; rejected otherwise                                            |
 
 ### 3.1b Numeric input validation
 
 `Number.isInteger` is **not** sufficient and must not be used to validate an integer that will be
 written. It returns `true` for `1e300` and for `9007199254740993`, and both reach the database:
 
-| Input | Outcome |
-|---|---|
-| `1e300` | STRICT rejects the bind — `cannot store REAL value in INTEGER column` — and the user gets a `500`, exactly the §3.1a failure mode |
+| Input              | Outcome                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `1e300`            | STRICT rejects the bind — `cannot store REAL value in INTEGER column` — and the user gets a `500`, exactly the §3.1a failure mode                |
 | `9007199254740993` | **commits**, as `9007199254740992`. `node:sqlite` has BigInt off (§1.1a), so every later read of that row throws `RangeError [ERR_OUT_OF_RANGE]` |
 
 The second is the dangerous one and it was reproduced end to end: one `PATCH /api/stores/{id}` body
@@ -576,12 +577,12 @@ session, unrecoverable.
 
 Therefore, for every numeric field in every request body:
 
-| Field | Rule |
-|---|---|
-| `sortOrder` | `Number.isSafeInteger`, and within `[-2147483648, 2147483647]` |
-| `version` | `Number.isSafeInteger`, `>= 1` |
-| `before` (trip history cursor) | `Number.isSafeInteger`, `>= 1` |
-| `limit` | integer 1–50 (§3.6) |
+| Field                          | Rule                                                           |
+| ------------------------------ | -------------------------------------------------------------- |
+| `sortOrder`                    | `Number.isSafeInteger`, and within `[-2147483648, 2147483647]` |
+| `version`                      | `Number.isSafeInteger`, `>= 1`                                 |
+| `before` (trip history cursor) | `Number.isSafeInteger`, `>= 1`                                 |
+| `limit`                        | integer 1–50 (§3.6)                                            |
 
 `Number.isSafeInteger` is the floor for anything that will be **written**; a range bound on top of it
 is required wherever the contract says a client-supplied integer is stored directly, which today is
@@ -597,17 +598,17 @@ backstop that catches a route that forgot to validate, in tests rather than in p
 
 ### 3.2 Authentication
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/auth/login` | public | Password login |
-| POST | `/api/auth/logout` | session | Destroy the current session |
-| POST | `/api/auth/password` | session | Change own password |
-| POST | `/api/auth/passkey/login/options` | public | Begin usernameless passkey login |
-| POST | `/api/auth/passkey/login/verify` | public | Finish passkey login |
-| POST | `/api/auth/passkey/register/options` | session | Begin passkey registration |
-| POST | `/api/auth/passkey/register/verify` | session | Finish passkey registration |
-| DELETE | `/api/auth/passkey/{credentialId}` | session | Remove one of **own** passkeys |
-| GET | `/api/me` | session | Current user + own passkeys |
+| Method | Path                                 | Auth    | Purpose                          |
+| ------ | ------------------------------------ | ------- | -------------------------------- |
+| POST   | `/api/auth/login`                    | public  | Password login                   |
+| POST   | `/api/auth/logout`                   | session | Destroy the current session      |
+| POST   | `/api/auth/password`                 | session | Change own password              |
+| POST   | `/api/auth/passkey/login/options`    | public  | Begin usernameless passkey login |
+| POST   | `/api/auth/passkey/login/verify`     | public  | Finish passkey login             |
+| POST   | `/api/auth/passkey/register/options` | session | Begin passkey registration       |
+| POST   | `/api/auth/passkey/register/verify`  | session | Finish passkey registration      |
+| DELETE | `/api/auth/passkey/{credentialId}`   | session | Remove one of **own** passkeys   |
+| GET    | `/api/me`                            | session | Current user + own passkeys      |
 
 **`POST /api/auth/login`**
 Request `{ "username": string, "password": string }`.
@@ -677,13 +678,13 @@ once, which is the whole reason the flag exists.
 
 ### 3.3 Admin
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/admin/users` | admin | List all accounts |
-| POST | `/api/admin/users` | admin | Create an account |
-| PATCH | `/api/admin/users/{userId}` | admin | Rename, grant/revoke admin, enable/disable |
-| POST | `/api/admin/users/{userId}/reset-password` | admin | Issue a new temporary password |
-| DELETE | `/api/admin/users/{userId}/passkeys` | admin | Remove **all** of that user's passkeys |
+| Method | Path                                       | Auth  | Purpose                                    |
+| ------ | ------------------------------------------ | ----- | ------------------------------------------ |
+| GET    | `/api/admin/users`                         | admin | List all accounts                          |
+| POST   | `/api/admin/users`                         | admin | Create an account                          |
+| PATCH  | `/api/admin/users/{userId}`                | admin | Rename, grant/revoke admin, enable/disable |
+| POST   | `/api/admin/users/{userId}/reset-password` | admin | Issue a new temporary password             |
+| DELETE | `/api/admin/users/{userId}/passkeys`       | admin | Remove **all** of that user's passkeys     |
 
 **`POST /api/admin/users`** — request `{ "username": string, "displayName": string, "isAdmin": boolean }`.
 `201` → `{ "user": User, "temporaryPassword": string }`. The server generates the password (20
@@ -704,11 +705,11 @@ active admins.
 
 ### 3.4 Stores
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/stores` | session | Store list for the home screen |
-| POST | `/api/stores` | session | Create a store (+ its first trip) |
-| PATCH | `/api/stores/{storeId}` | session | Rename, reorder, archive, un-archive |
+| Method | Path                    | Auth    | Purpose                              |
+| ------ | ----------------------- | ------- | ------------------------------------ |
+| GET    | `/api/stores`           | session | Store list for the home screen       |
+| POST   | `/api/stores`           | session | Create a store (+ its first trip)    |
+| PATCH  | `/api/stores/{storeId}` | session | Rename, reorder, archive, un-archive |
 
 `GET /api/stores?includeArchived=true` → `{ "stores": StoreSummary[] }`. The parameter defaults to
 `false`, which is the home screen. `true` additionally returns archived stores, each with
@@ -721,13 +722,17 @@ Response shape:
 
 ```ts
 type StoreSummary = {
-  id: string; name: string; color: StoreColor; sortOrder: number; rev: number;
+  id: string;
+  name: string;
+  color: StoreColor;
+  sortOrder: number;
+  rev: number;
   openTripId: string;
-  pendingCount: number;      // drives "Nothing needed" vs a count in the design
+  pendingCount: number; // drives "Nothing needed" vs a count in the design
   tickedCount: number;
   lastClosedTripAt: number | null;
   archivedAt: number | null;
-}
+};
 ```
 
 `POST /api/stores` request `{ "name": string, "color"?: StoreColor }` (name 1–60 chars per §3.1a; `color`
@@ -742,15 +747,15 @@ action there is to un-archive.
 
 ### 3.5 Lists and items
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/stores/{storeId}/list` | session | The open list for one store |
-| POST | `/api/stores/{storeId}/items` | session | Add an item |
-| PATCH | `/api/items/{itemId}` | session | Edit name or note |
-| DELETE | `/api/items/{itemId}` | session | Soft-delete |
-| POST | `/api/items/{itemId}/tick` | session | Mark bought |
-| POST | `/api/items/{itemId}/untick` | session | Undo |
-| POST | `/api/stores/{storeId}/trips/close` | session | Finish the trip, roll over |
+| Method | Path                                | Auth    | Purpose                     |
+| ------ | ----------------------------------- | ------- | --------------------------- |
+| GET    | `/api/stores/{storeId}/list`        | session | The open list for one store |
+| POST   | `/api/stores/{storeId}/items`       | session | Add an item                 |
+| PATCH  | `/api/items/{itemId}`               | session | Edit name or note           |
+| DELETE | `/api/items/{itemId}`               | session | Soft-delete                 |
+| POST   | `/api/items/{itemId}/tick`          | session | Mark bought                 |
+| POST   | `/api/items/{itemId}/untick`        | session | Undo                        |
+| POST   | `/api/stores/{storeId}/trips/close` | session | Finish the trip, roll over  |
 
 **`GET /api/stores/{storeId}/list`** → `{ "store": StoreSummary, "trip": Trip, "items": Item[] }`,
 items already ordered per **R-13**. Never includes soft-deleted or `carried` items.
@@ -799,10 +804,10 @@ appears to work.
 
 ### 3.6 Trip history
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/stores/{storeId}/trips` | session | Closed trips, newest first |
-| GET | `/api/trips/{tripId}` | session | One trip with its items |
+| Method | Path                          | Auth    | Purpose                    |
+| ------ | ----------------------------- | ------- | -------------------------- |
+| GET    | `/api/stores/{storeId}/trips` | session | Closed trips, newest first |
+| GET    | `/api/trips/{tripId}`         | session | One trip with its items    |
 
 `GET /api/trips/{tripId}` → `{ "trip": TripSummary, "items": Item[] }`. Items are ordered
 **bought first, then left behind** —
@@ -821,13 +826,13 @@ list only. Soft-deleted items are excluded per I-8. Works for open and closed tr
 
 In-process token buckets, keyed independently and both checked:
 
-| Bucket | Key | Limit |
-|---|---|---|
-| Password login | `username_key` | 10 per 15 min |
-| Password login | client IP | 300 per 15 min |
-| Passkey assertion | client IP | 300 per 15 min |
-| Passkey **options** (`login/options` + `register/options`) | client IP | 300 per 15 min |
-| Admin user creation | actor `user_id` | 20 per hour |
+| Bucket                                                     | Key             | Limit          |
+| ---------------------------------------------------------- | --------------- | -------------- |
+| Password login                                             | `username_key`  | 10 per 15 min  |
+| Password login                                             | client IP       | 300 per 15 min |
+| Passkey assertion                                          | client IP       | 300 per 15 min |
+| Passkey **options** (`login/options` + `register/options`) | client IP       | 300 per 15 min |
+| Admin user creation                                        | actor `user_id` | 20 per hour    |
 
 The per-IP limits are deliberately loose. **The whole family shares one home WAN IP**, and behind the
 reverse proxy every request may present that single address; a tight per-IP bucket would let one
@@ -857,12 +862,12 @@ let `parts` be `X-Forwarded-For` split on commas and trimmed. The client IP is
 `parts[parts.length - N]` — for `N = 1` that is the **last** entry, the address the single trusted
 proxy actually observed the connection from. Worked example, which is normative:
 
-| `X-Forwarded-For` | `ZEMBIL_TRUST_PROXY` | Client IP |
-|---|---|---|
-| `1.2.3.4, 203.0.113.9` | `1` | `203.0.113.9` |
-| `1.2.3.4, 203.0.113.9` | `0` | the socket peer address — the header is ignored entirely |
-| `203.0.113.9` | `2` | the socket peer address — fewer entries than trusted hops |
-| absent | `1` | the socket peer address |
+| `X-Forwarded-For`      | `ZEMBIL_TRUST_PROXY` | Client IP                                                 |
+| ---------------------- | -------------------- | --------------------------------------------------------- |
+| `1.2.3.4, 203.0.113.9` | `1`                  | `203.0.113.9`                                             |
+| `1.2.3.4, 203.0.113.9` | `0`                  | the socket peer address — the header is ignored entirely  |
+| `203.0.113.9`          | `2`                  | the socket peer address — fewer entries than trusted hops |
+| absent                 | `1`                  | the socket peer address                                   |
 
 Everything to the left of the trusted hops is client-supplied and must never be read. An off-by-one
 here — `parts[parts.length - 1 - N]` is the natural-looking transcription and is **wrong** — hands
@@ -883,9 +888,9 @@ fewer than ten users the extra fetch costs nothing.
 
 ```ts
 type ZembilEvent =
-  | { v: 1; type: 'store.changed';  storeId: string; rev: number }
-  | { v: 1; type: 'stores.changed' }                    // a store was created, renamed or archived
-  | { v: 1; type: 'session.revoked' }                   // this session specifically; client logs out
+  | { v: 1; type: "store.changed"; storeId: string; rev: number }
+  | { v: 1; type: "stores.changed" } // a store was created, renamed or archived
+  | { v: 1; type: "session.revoked" }; // this session specifically; client logs out
 ```
 
 **Wire format — normative.** Every event is an **unnamed** (default `message`) event whose `data` is
@@ -966,29 +971,29 @@ export function subscribe(
   userId: string,
   sessionId: string,
   send: (event: ZembilEvent) => void,
-  close?: () => void
+  close?: () => void,
 ): () => void;
 ```
 
 `revokeSession` is called on logout and on password change (which destroys the user's other
 sessions); `revokeUserStreams` is called when an admin disables an account or resets its password.
-Without these two, "disabling an account means *now*" — the entire reason D-004 chose server-side
+Without these two, "disabling an account means _now_" — the entire reason D-004 chose server-side
 sessions over JWTs — is silently unimplemented, and a disabled member keeps a live stream.
 
 ---
 
 ## 5. Session and cookie contract
 
-| Property | Value |
-|---|---|
-| Name | `__Host-zembil_session` over HTTPS, `zembil_session` when `ZEMBIL_ORIGIN` is `http://` (dev only) |
-| Value | 32 random bytes from `crypto.randomBytes`, base64url — **the raw token, stored only here** |
-| `HttpOnly` | yes |
-| `Secure` | yes — **written literally**, never left implicit. `__Host-` *requires* the attribute; a browser silently rejects a `__Host-` cookie without it and login fails with no error anywhere |
-| `SameSite` | `Lax` |
-| `Path` | `/` |
-| `Domain` | never set (required by `__Host-`) |
-| `Max-Age` | matches `idle_expires_at` |
+| Property   | Value                                                                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name       | `__Host-zembil_session` over HTTPS, `zembil_session` when `ZEMBIL_ORIGIN` is `http://` (dev only)                                                                                     |
+| Value      | 32 random bytes from `crypto.randomBytes`, base64url — **the raw token, stored only here**                                                                                            |
+| `HttpOnly` | yes                                                                                                                                                                                   |
+| `Secure`   | yes — **written literally**, never left implicit. `__Host-` _requires_ the attribute; a browser silently rejects a `__Host-` cookie without it and login fails with no error anywhere |
+| `SameSite` | `Lax`                                                                                                                                                                                 |
+| `Path`     | `/`                                                                                                                                                                                   |
+| `Domain`   | never set (required by `__Host-`)                                                                                                                                                     |
+| `Max-Age`  | matches `idle_expires_at`                                                                                                                                                             |
 
 - Idle TTL 30 days, absolute TTL 180 days. Both are enforced server-side; the cookie's own expiry is a
   convenience, never the authority.
@@ -1003,7 +1008,7 @@ sessions over JWTs — is silently unimplemented, and a disabled member keeps a 
 the other four headers and **must not set `Content-Security-Policy`**. SvelteKit emits an inline
 hydration script and injects its own `'sha256-…'` into the CSP it generates; a static header set in
 hooks either replaces that one and loses the hash, or is sent as a second header — and a browser
-enforces the *intersection* of multiple CSP headers, which loses the hash too. Either way
+enforces the _intersection_ of multiple CSP headers, which loses the hash too. Either way
 `script-src 'self'` blocks SvelteKit's own hydration payload, so the app renders, never hydrates, and
 does it **in the production build only**. This is the single easiest way to ship a broken app that
 passes every dev-mode check.
@@ -1024,7 +1029,7 @@ csp: {
 
 `style-src` carries `'unsafe-inline'` and `script-src` does not. That asymmetry is deliberate: a
 single `style="width: 40%"` anywhere in the frontend — and a progress bar or a swipe transform will
-produce one — is blocked by a strict `style-src`, while the injection risk from inline *styles* on a
+produce one — is blocked by a strict `style-src`, while the injection risk from inline _styles_ on a
 same-origin app with no user-supplied HTML is negligible next to the risk from inline scripts. If
 `style-src-attr 'unsafe-inline'` alone proves sufficient once the UI exists, narrow it then;
 `script-src` stays strict either way and `'unsafe-inline'` must never appear there.
@@ -1091,20 +1096,20 @@ their backups were never any good.
 
 ## 6. Environment variables
 
-| Name | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `ZEMBIL_ORIGIN` | URL | **yes** | — | e.g. `https://zembil.example.com`. Drives CSRF origin checks and WebAuthn `expectedOrigin`. Startup fails if unset or unparseable. |
-| `ZEMBIL_RP_ID` | hostname | no | **full hostname** of `ZEMBIL_ORIGIN` | WebAuthn relying-party ID. See the note below — this is the **full hostname**, not the registrable domain. |
-| `ZEMBIL_RP_NAME` | string | no | `Zembil` | Shown in the OS passkey prompt. |
-| `ZEMBIL_DATA_DIR` | path | no | `/data` | Holds `zembil.db` and its `-wal`/`-shm` sidecars. |
-| `PORT` | int | no | `3000` | |
-| `HOST` | string | no | `0.0.0.0` | Inside the container only; compose binds to loopback. |
-| `ZEMBIL_TRUST_PROXY` | int | no | `1` | Trusted `X-Forwarded-For` hops. `0` disables header trust entirely. |
-| `ZEMBIL_BOOTSTRAP_ADMIN_USERNAME` | string | no | `admin` | Used only when the users table is empty. |
-| `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD` | string | no | generated | If unset, a random password is generated and logged **once**. |
-| `ZEMBIL_SESSION_IDLE_DAYS` | int | no | `30` | |
-| `ZEMBIL_SESSION_ABSOLUTE_DAYS` | int | no | `180` | |
-| `ZEMBIL_LOG_LEVEL` | enum | no | `info` | `debug\|info\|warn\|error` |
+| Name                              | Type     | Required | Default                              | Notes                                                                                                                              |
+| --------------------------------- | -------- | -------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `ZEMBIL_ORIGIN`                   | URL      | **yes**  | —                                    | e.g. `https://zembil.example.com`. Drives CSRF origin checks and WebAuthn `expectedOrigin`. Startup fails if unset or unparseable. |
+| `ZEMBIL_RP_ID`                    | hostname | no       | **full hostname** of `ZEMBIL_ORIGIN` | WebAuthn relying-party ID. See the note below — this is the **full hostname**, not the registrable domain.                         |
+| `ZEMBIL_RP_NAME`                  | string   | no       | `Zembil`                             | Shown in the OS passkey prompt.                                                                                                    |
+| `ZEMBIL_DATA_DIR`                 | path     | no       | `/data`                              | Holds `zembil.db` and its `-wal`/`-shm` sidecars.                                                                                  |
+| `PORT`                            | int      | no       | `3000`                               |                                                                                                                                    |
+| `HOST`                            | string   | no       | `0.0.0.0`                            | Inside the container only; compose binds to loopback.                                                                              |
+| `ZEMBIL_TRUST_PROXY`              | int      | no       | `1`                                  | Trusted `X-Forwarded-For` hops. `0` disables header trust entirely.                                                                |
+| `ZEMBIL_BOOTSTRAP_ADMIN_USERNAME` | string   | no       | `admin`                              | Used only when the users table is empty.                                                                                           |
+| `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD` | string   | no       | generated                            | If unset, a random password is generated and logged **once**.                                                                      |
+| `ZEMBIL_SESSION_IDLE_DAYS`        | int      | no       | `30`                                 |                                                                                                                                    |
+| `ZEMBIL_SESSION_ABSOLUTE_DAYS`    | int      | no       | `180`                                |                                                                                                                                    |
+| `ZEMBIL_LOG_LEVEL`                | enum     | no       | `info`                               | `debug\|info\|warn\|error`                                                                                                         |
 
 **`ZEMBIL_RP_ID` must be the full hostname** (`zembil.example.com`), never the registrable domain
 (`example.com`). An rpID is a scope, and a credential scoped to `example.com` may be requested by
@@ -1181,7 +1186,14 @@ export interface Passkey {
 }
 
 export type StoreColor =
-  | 'terracotta' | 'green' | 'violet' | 'blue' | 'amber' | 'rose' | 'teal' | 'slate';
+  | "terracotta"
+  | "green"
+  | "violet"
+  | "blue"
+  | "amber"
+  | "rose"
+  | "teal"
+  | "slate";
 
 export interface StoreSummary {
   id: string;
@@ -1193,12 +1205,12 @@ export interface StoreSummary {
   pendingCount: number;
   tickedCount: number;
   lastClosedTripAt: number | null;
-  archivedAt: number | null;   // always accurate. The ?includeArchived=true listing is the only
-                               // place a non-null value appears in the store LIST; an embedded
-                               // summary (e.g. GET /stores/{id}/list) always reports the truth.
+  archivedAt: number | null; // always accurate. The ?includeArchived=true listing is the only
+  // place a non-null value appears in the store LIST; an embedded
+  // summary (e.g. GET /stores/{id}/list) always reports the truth.
 }
 
-export type TripStatus = 'open' | 'closed';
+export type TripStatus = "open" | "closed";
 
 export interface Trip {
   id: string;
@@ -1215,7 +1227,7 @@ export interface TripSummary extends Trip {
   carriedCount: number;
 }
 
-export type ItemState = 'pending' | 'ticked' | 'carried';
+export type ItemState = "pending" | "ticked" | "carried";
 
 export interface Item {
   id: string;
@@ -1226,7 +1238,7 @@ export interface Item {
   state: ItemState;
   sortOrder: number;
   tickedAt: number | null;
-  tickedByName: string | null;   // display name, never the user id — no id leakage to the client
+  tickedByName: string | null; // display name, never the user id — no id leakage to the client
   carryCount: number;
   version: number;
   createdAt: number;
@@ -1238,13 +1250,22 @@ export interface ApiError {
 }
 
 /** The only two error responses with a named sibling field — see §3.1. */
-export interface VersionConflictError extends ApiError { item: Item; }
-export interface TripAlreadyClosedError extends ApiError { openTripId: string; }
-export interface StoreNameTakenError extends ApiError { storeId: string; }
+export interface VersionConflictError extends ApiError {
+  item: Item;
+}
+export interface TripAlreadyClosedError extends ApiError {
+  openTripId: string;
+}
+export interface StoreNameTakenError extends ApiError {
+  storeId: string;
+}
 
 /** Every item-mutating endpoint returns this — see §3.5. `rev` is the store's
  *  rev AFTER the write, and is what lets a client suppress its own echo. */
-export interface ItemMutation { item: Item; rev: number; }
+export interface ItemMutation {
+  item: Item;
+  rev: number;
+}
 ```
 
 A note on `version`: `tick` and `untick` bump `items.version` (R-3, R-5) while `PATCH /api/items/{id}`
@@ -1273,16 +1294,16 @@ Same rule as the header: if something here is wrong, ambiguous or missing, **sto
 Complete file: `src/lib/server/db/migrations/002_claims_visibility_locale_push.sql`. Every statement is
 additive; no existing column, index or constraint is altered or dropped.
 
-| Change | Shape |
-|---|---|
-| `users.locale` | `TEXT NOT NULL DEFAULT 'en' CHECK (locale IN ('en','tr','de'))` |
-| `stores.private_to` | `TEXT REFERENCES users(id)` — **NULL means public**. `ON DELETE` is absent (NO ACTION) on purpose. |
-| *(migration 003)* `stores.name_key` | Re-keyed for existing private stores: `private_to \|\| char(31) \|\| name_key`. See §8.4a. |
-| `trips.claimed_by` | `TEXT REFERENCES users(id) ON DELETE SET NULL` |
-| `trips.claimed_at` | `INTEGER` |
-| `trips.claim_note` | `TEXT CHECK (claim_note IS NULL OR (length(trim(claim_note)) > 0 AND length(claim_note) <= 140))` |
-| `push_subscriptions` | new table, see the DDL. `endpoint` is `UNIQUE` **table-wide**, not per user. |
-| `server_keys` | new table, `name` constrained to `('vapid')`. |
+| Change                              | Shape                                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `users.locale`                      | `TEXT NOT NULL DEFAULT 'en' CHECK (locale IN ('en','tr','de'))`                                    |
+| `stores.private_to`                 | `TEXT REFERENCES users(id)` — **NULL means public**. `ON DELETE` is absent (NO ACTION) on purpose. |
+| _(migration 003)_ `stores.name_key` | Re-keyed for existing private stores: `private_to \|\| char(31) \|\| name_key`. See §8.4a.         |
+| `trips.claimed_by`                  | `TEXT REFERENCES users(id) ON DELETE SET NULL`                                                     |
+| `trips.claimed_at`                  | `INTEGER`                                                                                          |
+| `trips.claim_note`                  | `TEXT CHECK (claim_note IS NULL OR (length(trim(claim_note)) > 0 AND length(claim_note) <= 140))`  |
+| `push_subscriptions`                | new table, see the DDL. `endpoint` is `UNIQUE` **table-wide**, not per user.                       |
+| `server_keys`                       | new table, `name` constrained to `('vapid')`.                                                      |
 
 Measured on this build before the migration was written: `ALTER TABLE … ADD COLUMN` accepts a
 column-level `CHECK` and a `REFERENCES` clause whose default is `NULL`, and both are enforced
@@ -1315,7 +1336,7 @@ Following §1.2's convention, each says who enforces it.
   fixed in the code rather than excused in the text (migration 003, §8.4a), and the invariant is true
   as it stands. Two carve-outs remain, and they are stated rather than hidden:
 
-  1. **The SSE stream reveals that *some* store changed, and when.** Hints are broadcast to every
+  1. **The SSE stream reveals that _some_ store changed, and when.** Hints are broadcast to every
      stream (§8.4, "Realtime"), so a member receives `store.changed` for a store they cannot see, and
      may infer that one exists and is being edited. The id in the hint is a v4 UUID that is useless to
      them — every endpoint answers 404 — and per-user filtering would mean the stream carrying data,
@@ -1356,10 +1377,10 @@ Following §1.2's convention, each says who enforces it.
   **A private store reserves nothing in anybody else's namespace.** Its name is not taken from them,
   and its colour is not taken from their palette (§8.4a). Making a store private, or public again, can
   therefore fail with `409 STORE_NAME_TAKEN` if the name is already in use in the namespace it is
-  moving *into* — the transition is refused whole and the row is left exactly as it was.
+  moving _into_ — the transition is refused whole and the row is left exactly as it was.
 
   **Superseded clause, recorded rather than deleted.** R-22 originally said a collision against an
-  invisible store was `409 STORE_NAME_TAKEN` *without* the `storeId` sibling field. The M6 audit
+  invisible store was `409 STORE_NAME_TAKEN` _without_ the `storeId` sibling field. The M6 audit
   pointed out that this still discloses the private store's **name**, which is a worse leak than the
   id being withheld, and that it contradicted I-18 outright. §8.4a fixes the cause; the clause is now
   unreachable because an invisible collision cannot occur.
@@ -1367,22 +1388,22 @@ Following §1.2's convention, each says who enforces it.
 ### 8.4 Visibility — the authorization rule, stated once
 
 > A store is **visible** to a member when `stores.private_to IS NULL` **or** `stores.private_to = <the
-> session's user id>`. Nothing else grants visibility. **Being an admin does not.**
+session's user id>`. Nothing else grants visibility. **Being an admin does not.**
 
 Every store-scoped endpoint resolves visibility from `locals.user.id` and nothing else, **before** any
 other check, and an invisible store is reported exactly as a non-existent one:
 
-| Endpoint | On an invisible store |
-|---|---|
-| `GET /api/stores` | The row is absent from the array. |
-| `PATCH /api/stores/{id}` | `404 STORE_NOT_FOUND` |
-| `GET /api/stores/{id}/list` | `404 STORE_NOT_FOUND` |
-| `POST /api/stores/{id}/items` | `404 STORE_NOT_FOUND` |
-| `POST /api/stores/{id}/trips/close` | `404 STORE_NOT_FOUND` |
-| `GET /api/stores/{id}/trips` | `404 STORE_NOT_FOUND` |
-| `POST|DELETE /api/stores/{id}/claim` | `404 STORE_NOT_FOUND` |
-| `PATCH|DELETE /api/items/{id}`, `tick`, `untick` | `404 ITEM_NOT_FOUND` |
-| `GET /api/trips/{id}` | `404 TRIP_NOT_FOUND` |
+| Endpoint                            | On an invisible store                     |
+| ----------------------------------- | ----------------------------------------- |
+| `GET /api/stores`                   | The row is absent from the array.         |
+| `PATCH /api/stores/{id}`            | `404 STORE_NOT_FOUND`                     |
+| `GET /api/stores/{id}/list`         | `404 STORE_NOT_FOUND`                     |
+| `POST /api/stores/{id}/items`       | `404 STORE_NOT_FOUND`                     |
+| `POST /api/stores/{id}/trips/close` | `404 STORE_NOT_FOUND`                     |
+| `GET /api/stores/{id}/trips`        | `404 STORE_NOT_FOUND`                     |
+| `POST                               | DELETE /api/stores/{id}/claim`            | `404 STORE_NOT_FOUND` |
+| `PATCH                              | DELETE /api/items/{id}`, `tick`, `untick` | `404 ITEM_NOT_FOUND`  |
+| `GET /api/trips/{id}`               | `404 TRIP_NOT_FOUND`                      |
 
 `404`, never `403`: a `403` on a private store tells the caller a store with that id exists and belongs
 to somebody, which is the one fact the feature is for hiding. The `404` an invisible store produces is
@@ -1400,9 +1421,9 @@ Uniqueness has to have the **same scope as visibility**, or the `UNIQUE` constra
 
 `stores.name_key` is therefore namespaced by the owner for a private store:
 
-| Visibility | `name_key` |
-|---|---|
-| public | `<normalized name>` |
+| Visibility     | `name_key`                           |
+| -------------- | ------------------------------------ |
+| public         | `<normalized name>`                  |
 | private to `U` | `U` + `U+001F` + `<normalized name>` |
 
 so public names stay unique among public stores, each member's private names stay unique to that
@@ -1432,9 +1453,9 @@ in `README.md` and is the deliberate price of "only visible to that specific use
 
 ### 8.5 Locale — §3.2 delta
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| PATCH | `/api/me` | session | Set the caller's own interface language |
+| Method | Path      | Auth    | Purpose                                 |
+| ------ | --------- | ------- | --------------------------------------- |
+| PATCH  | `/api/me` | session | Set the caller's own interface language |
 
 `PATCH /api/me` request `{ "locale": "en" | "tr" | "de" }` → `200 { "user": User }`. An unknown value is
 `400 VALIDATION_FAILED`. It sets the **caller's own** locale and reads the target id from the session;
@@ -1453,7 +1474,7 @@ translated by the client that displays it. The client renders from the same cata
 **The locale is delivered by the root `load`, and the document is labelled with it.** `app.html`
 carries `lang="%zembil.lang%"`, substituted per request in `hooks.server.ts` via `transformPageChunk`,
 so the SSR'd document is already in the right language on the first paint — the theme-flash bug
-recorded in PROJECT.md §13 has exactly this shape and a flash of the wrong *language* is worse. A
+recorded in PROJECT.md §13 has exactly this shape and a flash of the wrong _language_ is worse. A
 language change made inside the app is a client-side navigation, which re-renders the body but not
 `<html>`, so the root layout also sets `document.documentElement.lang` in an effect. Both halves are
 required; either alone leaves the attribute disagreeing with the text under it.
@@ -1465,10 +1486,10 @@ push text depend on whichever device last made a request.
 
 ### 8.6 Claims — §3.4 delta
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/stores/{storeId}/claim` | session | "I'm going to this shop" |
-| DELETE | `/api/stores/{storeId}/claim` | session | Release it |
+| Method | Path                          | Auth    | Purpose                  |
+| ------ | ----------------------------- | ------- | ------------------------ |
+| POST   | `/api/stores/{storeId}/claim` | session | "I'm going to this shop" |
+| DELETE | `/api/stores/{storeId}/claim` | session | Release it               |
 
 `POST` request `{ "tripId": string, "note"?: string | null, "takeover"?: boolean }`.
 
@@ -1502,11 +1523,11 @@ Releasing an already-unclaimed trip is `200` and, per §3.0, bumps nothing and e
 
 ```ts
 type Claim = {
-  claimedByName: string | null;   // display name, never a user id
-  claimedByMe: boolean;           // computed per request from the session
+  claimedByName: string | null; // display name, never a user id
+  claimedByMe: boolean; // computed per request from the session
   claimedAt: number | null;
   claimNote: string | null;
-}
+};
 ```
 
 `claimedByMe` exists because §3's "responses carry display names, never user ids" leaves the client no
@@ -1521,12 +1542,12 @@ the "who may republish it" question answers itself. Any member may privatise any
 
 ### 8.7 Web push — §3.9
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/push/key` | session | The VAPID public key, base64url |
-| GET | `/api/push/subscription` | session | Is this browser registered? |
-| POST | `/api/push/subscription` | session | Register this browser |
-| DELETE | `/api/push/subscription` | session | Unregister this browser |
+| Method | Path                     | Auth    | Purpose                         |
+| ------ | ------------------------ | ------- | ------------------------------- |
+| GET    | `/api/push/key`          | session | The VAPID public key, base64url |
+| GET    | `/api/push/subscription` | session | Is this browser registered?     |
+| POST   | `/api/push/subscription` | session | Register this browser           |
+| DELETE | `/api/push/subscription` | session | Unregister this browser         |
 
 - `GET /api/push/key` → `{ "publicKey": string }`. The keypair is **generated on first use** and stored
   in `server_keys`, so there is still nothing for an operator to provision (D-038). When
@@ -1579,17 +1600,30 @@ and leaves the row. A push failure is never visible to the person whose write tr
 never see each other's code (D-025):
 
 ```ts
-export interface AddedItem { storeId: string; actorId: string; itemName: string; }
-export interface NotificationBatch {
-  storeId: string; armedAt: number; count: number; names: string[]; actorIds: string[];
+export interface AddedItem {
+  storeId: string;
+  actorId: string;
+  itemName: string;
 }
-export type NotificationSink = (batch: NotificationBatch) => void | Promise<void>;
+export interface NotificationBatch {
+  storeId: string;
+  armedAt: number;
+  count: number;
+  names: string[];
+  actorIds: string[];
+}
+export type NotificationSink = (
+  batch: NotificationBatch,
+) => void | Promise<void>;
 
-export function noteItemAdded(added: AddedItem): void;      // after the add commits
-export function noteStoreActivity(storeId: string): void;   // after any other store write commits
-export function setNotificationSink(sink: NotificationSink | null): void;  // startup wiring
-export function configureNotifier(o: { quietMs: number; maxDelayMs: number }): void;
-export function flushNotifications(): void;                 // test seam only — see below
+export function noteItemAdded(added: AddedItem): void; // after the add commits
+export function noteStoreActivity(storeId: string): void; // after any other store write commits
+export function setNotificationSink(sink: NotificationSink | null): void; // startup wiring
+export function configureNotifier(o: {
+  quietMs: number;
+  maxDelayMs: number;
+}): void;
+export function flushNotifications(): void; // test seam only — see below
 ```
 
 The domain layer calls the first two and knows nothing else about notifications. It calls them **after
@@ -1611,22 +1645,22 @@ next add arms a new one.
 Additional rows for the §3.0 table. Same rule: a write not listed bumps nothing and emits nothing, and
 an idempotent no-op does neither.
 
-| Endpoint | Bumps | Emits | Notifies |
-|---|---|---|---|
-| `POST /api/stores/{id}/items` (**new** row) | `stores.rev` | `store.changed` | `noteItemAdded` |
-| `POST /api/stores/{id}/items` (idempotent hit, R-17) | — | — | — |
-| `PATCH /api/items/{id}` | `stores.rev` | `store.changed` | `noteStoreActivity` |
-| `DELETE /api/items/{id}` (first delete) | `stores.rev` | `store.changed` | `noteStoreActivity` |
-| `POST /api/items/{id}/{tick,untick}` (state changed) | `stores.rev` | `store.changed` | `noteStoreActivity` |
-| `POST /api/items/{id}/{tick,untick}` (no change, R-4/R-5) | — | — | — |
-| `POST /api/stores/{id}/trips/close` | `stores.rev` | `store.changed` **and** `stores.changed` | `noteStoreActivity` |
-| `PATCH /api/stores/{id}` (incl. `visibility`) | `stores.rev` | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
-| `POST /api/stores/{id}/claim` (claim changed) | `stores.rev` | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
-| `POST /api/stores/{id}/claim` (same holder, same note) | — | — | — |
-| `DELETE /api/stores/{id}/claim` (was claimed) | `stores.rev` | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
-| `DELETE /api/stores/{id}/claim` (was unclaimed) | — | — | — |
-| `PATCH /api/me` | — | — | — |
-| `POST|DELETE /api/push/subscription` | — | — | — |
+| Endpoint                                                  | Bumps                          | Emits                                    | Notifies            |
+| --------------------------------------------------------- | ------------------------------ | ---------------------------------------- | ------------------- |
+| `POST /api/stores/{id}/items` (**new** row)               | `stores.rev`                   | `store.changed`                          | `noteItemAdded`     |
+| `POST /api/stores/{id}/items` (idempotent hit, R-17)      | —                              | —                                        | —                   |
+| `PATCH /api/items/{id}`                                   | `stores.rev`                   | `store.changed`                          | `noteStoreActivity` |
+| `DELETE /api/items/{id}` (first delete)                   | `stores.rev`                   | `store.changed`                          | `noteStoreActivity` |
+| `POST /api/items/{id}/{tick,untick}` (state changed)      | `stores.rev`                   | `store.changed`                          | `noteStoreActivity` |
+| `POST /api/items/{id}/{tick,untick}` (no change, R-4/R-5) | —                              | —                                        | —                   |
+| `POST /api/stores/{id}/trips/close`                       | `stores.rev`                   | `store.changed` **and** `stores.changed` | `noteStoreActivity` |
+| `PATCH /api/stores/{id}` (incl. `visibility`)             | `stores.rev`                   | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
+| `POST /api/stores/{id}/claim` (claim changed)             | `stores.rev`                   | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
+| `POST /api/stores/{id}/claim` (same holder, same note)    | —                              | —                                        | —                   |
+| `DELETE /api/stores/{id}/claim` (was claimed)             | `stores.rev`                   | `stores.changed` **and** `store.changed` | `noteStoreActivity` |
+| `DELETE /api/stores/{id}/claim` (was unclaimed)           | —                              | —                                        | —                   |
+| `PATCH /api/me`                                           | —                              | —                                        | —                   |
+| `POST                                                     | DELETE /api/push/subscription` | —                                        | —                   | —   |
 
 A claim emits **both** store events for the same reason a close does: the home screen card shows the
 claim, and so does the list header.
@@ -1638,12 +1672,12 @@ field; §3.1's rule that exactly three responses carry one is unchanged.
 
 ### 8.11 Environment variables added — §6 delta
 
-| Name | Default | Note |
-|---|---|---|
-| `ZEMBIL_PUSH_ENABLED` | `true` | `0`/`false`/`no` turns push off. Nothing else is off. |
-| `ZEMBIL_VAPID_SUBJECT` | `ZEMBIL_ORIGIN`, **when it is https** | VAPID `sub` claim; `mailto:` or `https://`. See below. |
-| `ZEMBIL_NOTIFY_QUIET_MINUTES` | `5` | R-21's quiet window. `0` delivers immediately. |
-| `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES` | `30` | R-21's ceiling. Must be ≥ the quiet window. |
+| Name                              | Default                               | Note                                                   |
+| --------------------------------- | ------------------------------------- | ------------------------------------------------------ |
+| `ZEMBIL_PUSH_ENABLED`             | `true`                                | `0`/`false`/`no` turns push off. Nothing else is off.  |
+| `ZEMBIL_VAPID_SUBJECT`            | `ZEMBIL_ORIGIN`, **when it is https** | VAPID `sub` claim; `mailto:` or `https://`. See below. |
+| `ZEMBIL_NOTIFY_QUIET_MINUTES`     | `5`                                   | R-21's quiet window. `0` delivers immediately.         |
+| `ZEMBIL_NOTIFY_MAX_DELAY_MINUTES` | `30`                                  | R-21's ceiling. Must be ≥ the quiet window.            |
 
 `ZEMBIL_ORIGIN` remains the only required variable.
 
@@ -1668,8 +1702,8 @@ Same rule as the header: if something here is wrong, ambiguous or missing, **sto
 
 ### 9.1 `DELETE /api/stores/{storeId}`
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
+| Method | Path                    | Auth    | Purpose                                          |
+| ------ | ----------------------- | ------- | ------------------------------------------------ |
 | DELETE | `/api/stores/{storeId}` | session | Delete a store and everything on it, permanently |
 
 Request: no body (any body is ignored). `200 → { "deleted": StoreDeletion }`:
@@ -1677,9 +1711,9 @@ Request: no body (any body is ignored). `200 → { "deleted": StoreDeletion }`:
 ```ts
 interface StoreDeletion {
   storeId: string;
-  name: string;   // the name it had when it went, so a screen can say what it deleted
-  trips: number;  // rows removed from trips
-  items: number;  // rows removed from items, carried clones included
+  name: string; // the name it had when it went, so a screen can say what it deleted
+  trips: number; // rows removed from trips
+  items: number; // rows removed from items, carried clones included
 }
 ```
 
@@ -1722,10 +1756,10 @@ respectively, both of which are already contract.
 
 ### 9.3 §3.0 delta — write effects
 
-| Endpoint | Bumps | Emits | Notes |
-|---|---|---|---|
+| Endpoint                            | Bumps               | Emits                                    | Notes                                                             |
+| ----------------------------------- | ------------------- | ---------------------------------------- | ----------------------------------------------------------------- |
 | `DELETE /api/stores/{id}` (deleted) | — (the row is gone) | `stores.changed` **and** `store.changed` | `store.changed` carries `rev + 1`: a rev the row will never hold. |
-| `DELETE /api/stores/{id}` (refused) | — | — | A 404 emits nothing. |
+| `DELETE /api/stores/{id}` (refused) | —                   | —                                        | A 404 emits nothing.                                              |
 
 The `rev + 1` is normative, not incidental. A member standing on `/s/{id}` holds `rev` as their
 revalidation cursor and §4's rule is that a hint at or below the cursor is not worth a fetch. Only a
@@ -1786,7 +1820,7 @@ Six things about it that are normative:
    byte-identical `404 STORE_NOT_FOUND` — including an admin, who under D-040 cannot see another
    member's private store. A `403` there would confirm the store exists and belongs to somebody. In
    practice this means the admin exemption only ever applies to a store the admin can already see,
-   which is the intended scope: it is a way to undo a privatisation on a *shared* shop, not a
+   which is the intended scope: it is a way to undo a privatisation on a _shared_ shop, not a
    back door into a private one. **D-040 is untouched.**
 2. **The refusal takes the whole PATCH with it.** The check runs inside the write transaction and
    before the name key is recomputed (migration 003 scopes `name_key` by the owner, so a visibility
@@ -1881,7 +1915,7 @@ session may show it; anything in front of the session may not.
 
 ### 11.2 Bumping it
 
-The minor number *is* the milestone. Shipping M9 makes it `0.9.0` whether M9 was large or small,
+The minor number _is_ the milestone. Shipping M9 makes it `0.9.0` whether M9 was large or small,
 because the milestone is the unit this project plans, tests, audits and documents in. A fix between
 milestones takes the patch. It stays on `0.x` until something makes a compatibility promise to
 somebody outside this household — the frozen contract is that promise today, and a `1.0` would need a
@@ -1897,3 +1931,53 @@ Four places move together, and each is asserted or read by something:
 `RELEASED_ON` is a literal, not a build timestamp. A build timestamp would move every time the image
 is rebuilt, so "as of" would drift with no change to the app, and an operator comparing two
 containers could not tell a rebuild from a release.
+
+---
+
+## 12. Addendum 6 — recent-item suggestions and localised offline metadata (M10)
+
+### 12.1 Recent-item suggestions
+
+`GET /api/stores/{storeId}/suggestions?limit=8` is session-authenticated and store-scoped. It resolves
+§8.4 visibility first, so an invisible store and a fabricated id return the same `404
+STORE_NOT_FOUND`. `limit` is an integer from 1 through 20, default 8, validated by §3.1b.
+
+`200 → { "suggestions": string[] }`. Suggestions are the most recently **ticked** item names at that
+store, ordered by `ticked_at DESC`. They are deduplicated by `NFKC + lowercase + collapsed Unicode
+whitespace`; the most recent display spelling wins. A name already present as a non-deleted,
+non-carried item on the open trip is excluded by that same key. Deleted items are excluded. This is a
+read endpoint: it bumps no revision, emits no event and sends no notification.
+
+The query deliberately reads more than `limit` rows and performs Unicode normalisation in application
+code. SQLite `NOCASE` folds ASCII only and is wrong for Turkish; at one household's scale, stopping as
+soon as `limit` distinct eligible names have been found is both simpler and more correct than adding
+FTS or another stored key.
+
+Duplicate detection while composing is a **client warning, not a server constraint**. Two equal names
+can be intentional (different quantities or notes), so the first submit explains that the item is
+already on the open list and the second explicit submit adds another. No new invariant is introduced.
+
+### 12.2 Carry nudge and claim release
+
+No wire shape changes. `Item.carryCount` remains the existing lineage count. The client may surface it
+more prominently and the finish-trip confirmation may name how many pending items have already been
+carried at least once. Rollover R-6 is unchanged.
+
+`DELETE /api/stores/{storeId}/claim` is unchanged. When the current actor holds the claim, the list
+screen exposes that release beside the claim status rather than only inside the note-edit sheet. A
+navigation event never releases a claim automatically: mobile page lifecycle events are lossy, and
+leaving the screen is not the same statement as no longer going to the shop.
+
+### 12.3 Localised offline documents and manifests
+
+The §5 cache boundary is unchanged: authenticated HTML and API responses are never cached. The public
+precache contains `/offline-en.html`, `/offline-tr.html`, and `/offline-de.html`; each is static and
+contains no member or shopping data. The signed-in app sends the current `Locale` to its controlling
+service worker. The worker stores only that closed-set locale value in its own cache and chooses the
+matching static document when a navigation cannot reach the server. Until a preference has been
+received, English is the fallback.
+
+`app.html` selects `/manifest-{locale}.webmanifest` through the same server-side, closed-set locale
+substitution used for `<html lang>`. Each manifest differs only in `lang` and translated
+`description`; identity, scope, colours and icons remain identical. These manifests and the offline
+documents are public assets, not authenticated state.

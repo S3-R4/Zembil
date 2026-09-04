@@ -19,13 +19,14 @@ stream, and a hard requirement that the whole thing is one `docker compose up`.
 **Decision.** SvelteKit 2 (Svelte 5) with `@sveltejs/adapter-node`, running as a single Node process.
 
 **Alternatives rejected.**
-- *Next.js* — React's runtime and hydration cost is paid on every phone in the family, for an app
+
+- _Next.js_ — React's runtime and hydration cost is paid on every phone in the family, for an app
   whose hardest screen is a list of checkboxes. Its server model also assumes more infrastructure
   than one container.
-- *Fastify or Hono plus a hand-rolled client* — more control, but I would end up rebuilding routing,
+- _Fastify or Hono plus a hand-rolled client_ — more control, but I would end up rebuilding routing,
   SSR, form handling and asset hashing. That is work spent on plumbing rather than on rollover
   correctness.
-- *htmx or Datastar over server-rendered HTML* — genuinely attractive for this problem and it would
+- _htmx or Datastar over server-rendered HTML_ — genuinely attractive for this problem and it would
   produce the smallest client. Rejected because optimistic ticking with an undo affordance and a
   reconciling realtime stream is exactly the case where a hypermedia approach starts growing a
   client-side state machine anyway, at which point Svelte's is better than mine. **[unjudged]** — this
@@ -50,11 +51,12 @@ SQLite 3.53.0; `journal_mode=WAL`; window functions; `json1`; FTS5; `COLLATE NOC
 `db.aggregate`, `db.serialize`. There is **no** `db.backup()` method, which directly shapes D-013.
 
 **Alternatives rejected.**
-- *`better-sqlite3`* — the obvious default, and the API I would rather have. Rejected because it is a
+
+- _`better-sqlite3`_ — the obvious default, and the API I would rather have. Rejected because it is a
   native addon: on a Node release this new, a missing prebuild means the image needs python, make and
   g++, and an arm64 home server is exactly where that goes wrong at 23:00. `node:sqlite` makes the
   dependency disappear rather than making it easier.
-- *PostgreSQL* — the honest argument for it is analytics later. It loses anyway: it doubles the
+- _PostgreSQL_ — the honest argument for it is analytics later. It loses anyway: it doubles the
   compose file, adds a second failure domain and a second backup story, and its analytical advantage
   is irrelevant at a scale where the entire dataset is smaller than the query planner. SQLite has
   window functions and CTEs; a family's grocery history will not exhaust them.
@@ -72,7 +74,7 @@ via `ALTER TABLE ADD COLUMN`, a non-destructive migration.
 `.sql` files, applied in a transaction, tracked with `PRAGMA user_version`. A shipped migration is
 immutable; corrections are new migrations.
 
-**Alternatives rejected.** *Drizzle* and *Kysely* both give real type safety, and Drizzle's migration
+**Alternatives rejected.** _Drizzle_ and _Kysely_ both give real type safety, and Drizzle's migration
 generation is genuinely good. Rejected because the schema is nine tables that will barely change, the
 invariants that matter live in partial unique indexes and `CHECK` constraints that I want to read
 literally, and an ORM is one more thing that can break on a Node upgrade in an app nobody will touch
@@ -87,12 +89,12 @@ defect the reviewer treats as blocking.
 ## D-004 — Sessions: opaque random tokens stored hashed, not JWTs
 
 **Context.** "Only the admin creates accounts, hands them out, disables them." Disabling must mean
-*now*.
+_now_.
 
 **Decision.** 32 random bytes in a cookie. The database stores only `sha256(token)`. Idle expiry 30
 days, absolute expiry 180 days, both enforced server-side. Rotated on login and password change.
 
-**Alternatives rejected.** *JWT* — a stateless token cannot be revoked, so "disable this account"
+**Alternatives rejected.** _JWT_ — a stateless token cannot be revoked, so "disable this account"
 becomes "disable this account within fifteen minutes". Adding a revocation list to fix that
 reintroduces the database lookup JWTs existed to avoid, while keeping their footguns.
 
@@ -109,7 +111,7 @@ verification. Stored as `scrypt$N=…,r=…,p=…$salt$hash` so parameters can b
 schema change. Compared with `crypto.timingSafeEqual`. Transparent rehash on login when parameters
 are below target.
 
-**Alternatives rejected.** *Argon2id* is the better algorithm and I would prefer it. Both routes to it
+**Alternatives rejected.** _Argon2id_ is the better algorithm and I would prefer it. Both routes to it
 have costs that outweigh the margin here: `@node-rs/argon2` is a native addon, which throws away the
 main prize of D-002; a WASM build adds a dependency whose supply chain I would have to trust for the
 single most security-critical operation in the app. Memory-hard scrypt at 64 MiB, guarding
@@ -126,7 +128,7 @@ explicitly or Node throws. Migrating to Argon2 later is a login-time rehash, not
 and `DELETE` additionally requires `Origin` to equal `ZEMBIL_ORIGIN`. A **missing** `Origin` on a
 mutation is rejected rather than allowed through.
 
-**Alternatives rejected.** *Synchronizer tokens* — real protection, but they need a token in every
+**Alternatives rejected.** _Synchronizer tokens_ — real protection, but they need a token in every
 form and every fetch, and they break confusingly on a stale PWA tab. `SameSite` plus a strict origin
 check gets the same guarantee for browsers from the last several years, which is the entire audience.
 
@@ -158,6 +160,7 @@ an authenticated session. Login uses discoverable credentials with an empty `all
 username is typed. Password login always remains available and `users.password_hash` is never NULL.
 
 **Details that are load-bearing.**
+
 - `rpID` and `expectedOrigin` come from configuration, never from the request. Deriving them from a
   `Host` header is an authentication bypass.
 - The WebAuthn user handle is 32 random bytes stored per account — not the username, not a sequential
@@ -192,11 +195,12 @@ unticked item forward with `carried_from_item_id`, `origin_item_id` and an incre
 marking the original `carried`. Ticked items stay in the closed trip untouched — they are the history.
 
 **Alternatives rejected.**
-- *Move the row forward instead of cloning* — cheaper, but it destroys the record that this item was
+
+- _Move the row forward instead of cloning_ — cheaper, but it destroys the record that this item was
   on trip 3 and not bought. That record is precisely the substrate the deferred spending analytics
   will need, and per-item carry history is what would later power "you have carried bread four times".
-- *Dated or scheduled auto-rollover* — needs a scheduler, and it silently closes a list while someone
-  is standing in the shop. The brief says an unticked item lands on the next list *automatically*;
+- _Dated or scheduled auto-rollover_ — needs a scheduler, and it silently closes a list while someone
+  is standing in the shop. The brief says an unticked item lands on the next list _automatically_;
   that describes the carry-over, not the closing.
 
 **Consequences.** Item identity changes across a rollover; `origin_item_id` preserves lineage through
@@ -225,11 +229,11 @@ trip-scoped endpoint would have to fail and re-target.
 ## D-011 — Realtime: SSE carrying hints, not data
 
 **Decision.** One `GET /api/events` stream per tab, authenticated by the session cookie. Events say
-*"store X changed, revision N"*; the client refetches. Events are emitted **after** commit. A `:ping`
+_"store X changed, revision N"_; the client refetches. Events are emitted **after** commit. A `:ping`
 comment every 25 s. The client also revalidates on `visibilitychange`, `focus` and `online`.
 
-**Alternatives rejected.** *Polling* — simpler, but either wastes battery or feels stale; the brief
-asks for stale state to resolve quickly. *WebSockets* — bidirectional capability nothing here needs,
+**Alternatives rejected.** _Polling_ — simpler, but either wastes battery or feels stale; the brief
+asks for stale state to resolve quickly. _WebSockets_ — bidirectional capability nothing here needs,
 plus its own reconnection and proxy-configuration burden.
 
 **Why hints rather than payloads.** A hint is immune to out-of-order delivery and to the gap across a
@@ -271,6 +275,7 @@ It is async and incremental, taking `{ rate, progress }`. Run against a live WAL
 rows it copied 21 pages and the resulting file passed `PRAGMA quick_check`.
 
 **Decision.**
+
 - **Scheduled and on-demand snapshots use `backup()`.** Being incremental, it yields between page
   batches instead of holding a read lock for the whole copy, so a backup never stalls someone
   ticking an item in a shop.
@@ -312,8 +317,8 @@ an unmarked promise.
 `ZEMBIL_BOOTSTRAP_ADMIN_USERNAME` / `ZEMBIL_BOOTSTRAP_ADMIN_PASSWORD`. If no password is supplied, a
 random one is generated and logged once. `must_change_password` is set either way.
 
-**Alternatives rejected.** *Unconditional env application* — turns a leftover variable in a compose
-file into a permanent password reset on every restart. *A first-run web setup wizard* — a
+**Alternatives rejected.** _Unconditional env application_ — turns a leftover variable in a compose
+file into a permanent password reset on every restart. _A first-run web setup wizard_ — a
 publicly-reachable unauthenticated endpoint that creates an admin is a race against every scanner on
 the internet.
 
@@ -506,11 +511,11 @@ the original `carried` first points at a clone that does not exist yet. Insertin
 two rows carrying the same `client_id` inside `items_client_id`'s partial predicate at once. Measured,
 not reasoned:
 
-| Sequence | Result |
-|---|---|
-| update original, then insert clone | `FOREIGN KEY constraint failed` |
-| insert clone, then update original | `UNIQUE constraint failed: items.store_id, items.client_id` |
-| insert with `client_id=NULL`, update original, set clone's `client_id` | commits |
+| Sequence                                                               | Result                                                      |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| update original, then insert clone                                     | `FOREIGN KEY constraint failed`                             |
+| insert clone, then update original                                     | `UNIQUE constraint failed: items.store_id, items.client_id` |
+| insert with `client_id=NULL`, update original, set clone's `client_id` | commits                                                     |
 
 Deferring the FK would also work and would save one `UPDATE`. It is the wrong trade: `DEFERRABLE
 INITIALLY DEFERRED` suspends that check for **every** transaction in the application, forever, to buy
@@ -518,7 +523,7 @@ one statement on a path that runs once per shopping trip. The three-statement fo
 costs nothing at family scale, and leaves the constraint doing its job everywhere else.
 
 **Consequence.** Close is the one place in the codebase where statement order is load-bearing, so a
-test asserts that *both* wrong orders raise `SQLITE_CONSTRAINT`. Without that test the sequence would
+test asserts that _both_ wrong orders raise `SQLITE_CONSTRAINT`. Without that test the sequence would
 appear to "start working" the day someone drops a constraint for an unrelated reason.
 
 ---
@@ -535,7 +540,7 @@ two agents that the contract described in prose but never named. The contract sa
 writes `locals.session.user` and the data agent reads `locals.user.id`, both suites pass, and every
 write route throws `TypeError` at integration. It required auth-owned admin endpoints to terminate a
 user's SSE streams while forbidding that agent from touching the realtime module and never defining
-the function to call — so "disabling an account means *now*", the entire rationale for choosing
+the function to call — so "disabling an account means _now_", the entire rationale for choosing
 server-side sessions over JWTs in D-004, would have shipped unimplemented. And nobody owned
 `svelte.config.js`, which carries a CSP that D-026 shows is load-bearing.
 
@@ -556,7 +561,7 @@ That is a widening of what "contract" means here, and it is the right one.
 `hooks.server.ts` sets the other security headers and never CSP. `style-src` carries
 `'unsafe-inline'`; `script-src` never does.
 
-**Rationale.** §5 previously required a static CSP header set in hooks *and* `kit.csp` hash mode. Both
+**Rationale.** §5 previously required a static CSP header set in hooks _and_ `kit.csp` hash mode. Both
 cannot hold. SvelteKit emits an inline hydration script and injects its `'sha256-…'` into the CSP it
 generates; a static header either replaces that one or is sent alongside it, and a browser enforces
 the intersection of multiple CSP headers — the hash is lost either way. The result is an app that
@@ -594,18 +599,18 @@ it.
 ## D-028 — The SSE stream bound is `desiredSize`, and its real ceiling is the socket buffer
 
 **Decision.** `src/routes/api/events/+server.ts` tears a stream down when
-`controller.desiredSize <= -64`. That bound stays, but it is documented as an *eventual* bound, not a
+`controller.desiredSize <= -64`. That bound stays, but it is documented as an _eventual_ bound, not a
 64-event one: the measured ceiling per stalled stream is roughly **2.5 MB**, not 64 chunks.
 
 **Rationale.** Measured, not reasoned, against `@sveltejs/kit/node`'s `setResponse` on Node 26.1.0
 with a client that opens the stream and never reads a byte (a paused TCP socket, which is what a
 suspended phone or a deliberate stall actually looks like):
 
-| probe | result |
-| --- | --- |
-| chunks flush as enqueued, nothing buffers to EOF | headers at 29 ms, chunks at 30/47/68 ms — **pass** |
-| client disconnect fires the stream's `cancel` | fires — the route's unsubscribe is reachable, **pass** |
-| `desiredSize` falls for a consumer that stops reading | falls, but only after **27,749 events / 2.51 MB** |
+| probe                                                 | result                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------ |
+| chunks flush as enqueued, nothing buffers to EOF      | headers at 29 ms, chunks at 30/47/68 ms — **pass**     |
+| client disconnect fires the stream's `cancel`         | fires — the route's unsubscribe is reachable, **pass** |
+| `desiredSize` falls for a consumer that stops reading | falls, but only after **27,749 events / 2.51 MB**      |
 
 The reason for the gap is that `setResponse` pipes the web stream into the Node response, and the
 kernel and libuv socket buffers absorb everything until they are full. Until then the reader keeps
@@ -614,7 +619,7 @@ the socket stalls does backpressure reach the `ReadableStream` queue, and then t
 immediately.
 
 **Consequence.** Worst case is ~2.5 MB per stalled stream, ×4 streams per session (§4) × fewer than
-ten users — bounded, and acceptable for this deployment. It is *not* the tight bound the constant's
+ten users — bounded, and acceptable for this deployment. It is _not_ the tight bound the constant's
 name suggests, so the comment in `+server.ts` must not claim one. Probes 1 and 2 also close two of
 the `PLAN.md` §7 known gaps: adapter-node needs no explicit flush call, and disconnects do not leak
 bus subscriptions. Buffering at the **reverse proxy** is a separate risk and remains M4's problem —
@@ -632,14 +637,14 @@ accepting the library defaults.
 materially across v9, v10, v11 and v13, and `PLAN.md` §7 flagged recall as untrustworthy here. What
 the installed version actually says:
 
-| | v13.3.3 |
-| --- | --- |
-| `verifyRegistrationResponse` → | `registrationInfo.credential: { id: Base64URLString, publicKey: Uint8Array, counter, transports? }` |
-| | **not** the flat `credentialID` / `credentialPublicKey` / `counter` of v9–v10 |
-| `verifyAuthenticationResponse` takes | `credential: WebAuthnCredential` (**not** `authenticator:`) |
-| | and `expectedRPID` is **required**, not optional |
-| `generateRegistrationOptions` takes | `userID?: Uint8Array`, `userName`, `rpName`, `rpID` |
-| `verifyAuthenticationResponse` → | `authenticationInfo.newCounter` |
+|                                      | v13.3.3                                                                                             |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `verifyRegistrationResponse` →       | `registrationInfo.credential: { id: Base64URLString, publicKey: Uint8Array, counter, transports? }` |
+|                                      | **not** the flat `credentialID` / `credentialPublicKey` / `counter` of v9–v10                       |
+| `verifyAuthenticationResponse` takes | `credential: WebAuthnCredential` (**not** `authenticator:`)                                         |
+|                                      | and `expectedRPID` is **required**, not optional                                                    |
+| `generateRegistrationOptions` takes  | `userID?: Uint8Array`, `userName`, `rpName`, `rpID`                                                 |
+| `verifyAuthenticationResponse` →     | `authenticationInfo.newCounter`                                                                     |
 
 The trap worth naming: the JSDoc block above `VerifiedRegistrationResponse` still documents the old
 flat shape (`registrationInfo.credentialPublicKey`, `registrationInfo.credentialID`) while the type
@@ -666,13 +671,13 @@ guard, run the suite, and treat anything that stays green as a finding. Recorded
 **Rationale.** M1 took three audit rounds, and all three found the same failure — not a missing
 guard, but a guard that could not be reached by the test written to protect it:
 
-| round | guard | why the test could not reach it |
-| --- | --- | --- |
-| 1 | `Number.isInteger` on `sortOrder` | the check itself was wrong; the test asserted the 400 and never read the store list back |
-| 2 | `itemVersion` | the test omitted `name`, so `updateItem`'s "nothing to update" guard fired first |
-| 2 | `beforeSeq` | no test of any kind; it is reachable only through a query string |
-| 3 | `readJson`'s body-shape check | route layer — structurally unreachable from any domain-level test |
-| 3 | `handle()`'s generic-message promise | nothing ever forced a non-`DomainError` through a route |
+| round | guard                                | why the test could not reach it                                                          |
+| ----- | ------------------------------------ | ---------------------------------------------------------------------------------------- |
+| 1     | `Number.isInteger` on `sortOrder`    | the check itself was wrong; the test asserted the 400 and never read the store list back |
+| 2     | `itemVersion`                        | the test omitted `name`, so `updateItem`'s "nothing to update" guard fired first         |
+| 2     | `beforeSeq`                          | no test of any kind; it is reachable only through a query string                         |
+| 3     | `readJson`'s body-shape check        | route layer — structurally unreachable from any domain-level test                        |
+| 3     | `handle()`'s generic-message promise | nothing ever forced a non-`DomainError` through a route                                  |
 
 Each of these was correctly written and accurately commented. Reading the code confirmed the guard;
 reading the tests confirmed a test existed that named it. Only mutation showed the two were not
@@ -755,19 +760,19 @@ Two smaller rulings recorded here rather than given their own numbers:
 **Decision.** 102 mutations were applied across M2's guards (93 in the first pass, 9 corrections and
 re-runs in the second). 99 were killed. The remaining three are kept and documented in the code
 rather than tested, because no test can distinguish them: they are **provably redundant**, which
-D-030 did not anticipate as a category distinct from *vacuous*.
+D-030 did not anticipate as a category distinct from _vacuous_.
 
-| Guard | Why no test can kill it |
-|---|---|
-| `clientIp`'s `if (trustProxy <= 0) return socketAddress` | With `N = 0` the index is `parts[parts.length]`, always `undefined`, which falls through to the same socket address. Deleting the line changes no behaviour. |
-| `verification.verified` alongside `!info` in `verifyRegistration` | `@simplewebauthn` v13 throws rather than returning `{verified:false}` with a `registrationInfo`, so the two halves are never separately reachable. |
-| `Number.isSafeInteger` in `config.parseIntEnv` | Every current caller passes a `max` small enough (20, 3650) to reject `1e300` and `9007199254740993` anyway. |
+| Guard                                                             | Why no test can kill it                                                                                                                                      |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `clientIp`'s `if (trustProxy <= 0) return socketAddress`          | With `N = 0` the index is `parts[parts.length]`, always `undefined`, which falls through to the same socket address. Deleting the line changes no behaviour. |
+| `verification.verified` alongside `!info` in `verifyRegistration` | `@simplewebauthn` v13 throws rather than returning `{verified:false}` with a `registrationInfo`, so the two halves are never separately reachable.           |
+| `Number.isSafeInteger` in `config.parseIntEnv`                    | Every current caller passes a `max` small enough (20, 3650) to reject `1e300` and `9007199254740993` anyway.                                                 |
 
 **Rationale.** A vacuous guard and a redundant one look identical from the sweep — both stay green —
 and treating them the same way produces one of two bad outcomes: deleting a correct guard, or
 writing a test that asserts something the code does not actually decide. The distinction is whether
-the *protection* is missing (vacuous: the property is unenforced, and the sweep has found a hole) or
-merely *duplicated* (redundant: the property holds through another path, and the guard is insurance
+the _protection_ is missing (vacuous: the property is unenforced, and the sweep has found a hole) or
+merely _duplicated_ (redundant: the property holds through another path, and the guard is insurance
 against a later refactor breaking that path). The first is a defect. The second is a comment that
 was never written.
 
@@ -790,7 +795,7 @@ Four survivors from the first pass were genuine test gaps and were fixed rather 
   either way.
 
 **Consequence.** D-030's exit criterion stands with one refinement: a surviving mutation is a
-finding, and closing it means *either* a test that kills it *or* a written argument that the
+finding, and closing it means _either_ a test that kills it _or_ a written argument that the
 protection exists elsewhere. Silence is not one of the options.
 
 ---
@@ -850,7 +855,7 @@ The two survivors, and what each one taught:
 
 - **Precache membership matched by prefix.** The mutation swapped `includes` for
   `some(p => pathname.startsWith(p))` and the suite stayed green, because both of the paths the test
-  probed (`/_app/`, `/fonts/`) are *shorter* than the precached entries — the direction a prefix
+  probed (`/_app/`, `/fonts/`) are _shorter_ than the precached entries — the direction a prefix
   check gets right by accident. The dangerous direction is longer: `/offline.html.map`,
   `/offline.html/anything`. Now tested.
 - **The `createdAt` tiebreak in R-13.** The test's item ids ran in the same order as their
@@ -860,7 +865,7 @@ The two survivors, and what each one taught:
 
 Both are the same failure the M1 audits kept producing and D-030 was written for: a guard that is
 correct, commented, and covered by a test that cannot reach it. The second one is the more
-instructive, because the test looked *more* thorough for having chosen tidy ascending ids.
+instructive, because the test looked _more_ thorough for having chosen tidy ascending ids.
 
 **Consequence.** 350 unit tests and 10 Playwright specs. The service worker keeps its browser-level
 test — the unit tests prove the rule, and the spec proves the worker actually applies it.
@@ -870,8 +875,8 @@ test — the unit tests prove the rule, and the spec proves the worker actually 
 ## D-036 — Acting on the M2/M3/M4 audits, and what they said about the process
 
 **Decision.** The three reviewer passes that M5 was blocked on finally ran, and their blocking
-findings are closed. This entry records what they found and, more usefully, *why the suite could not
-have found it*.
+findings are closed. This entry records what they found and, more usefully, _why the suite could not
+have found it_.
 
 ### M4: `restore.sh` had two ways to destroy the database while printing `restore: done.`
 
@@ -880,13 +885,13 @@ have found it*.
   `false`, and the script then moved the live `zembil.db`, `-wal` and `-shm` aside while the server
   held them open. The reviewer showed the app healthy and serving with its file descriptors pointing
   into `pre-restore-…/`, still writing work that the next restart would throw away. Now: any
-  `inspect` failure other than a genuine *No such object* aborts, the resolved container name is
+  `inspect` failure other than a genuine _No such object_ aborts, the resolved container name is
   printed before the confirmation prompt, and — the part that actually closes it — the swap
   container proves nothing has the database open by taking an **EXCLUSIVE lock**, which also
   checkpoints the WAL so the file being moved aside is complete.
 - **The install was not atomic.** `cp` straight over the live path, so a full volume left a
   truncated `zembil.db` and the only good copy in a directory whose name does not say "this one is
-  the real database". Now the backup is copied to `.zembil.db.incoming`, verified *in place*, and
+  the real database". Now the backup is copied to `.zembil.db.incoming`, verified _in place_, and
   swapped with `mv` on the same filesystem; a failure before that swap leaves the original untouched,
   and a failure of the swap itself rolls the previous files back.
 
@@ -901,9 +906,9 @@ scratch Docker volume and pins both regressions.
   precisely because a dropped stream replays nothing — no `id:`, no `Last-Event-ID`. The list on
   screen kept its own cursor and was refetched only by an event arriving over a live stream, so a
   change made during the gap was lost permanently. The reviewer reproduced the worst presentation of
-  it: the store card reading *2 to buy* above a list showing one row.
+  it: the store card reading _2 to buy_ above a list showing one row.
 - **`load()` had no generation guard.** Two `/list` responses overtaking each other let the older one
-  win by arriving last, overwriting the items *and* dragging `rev` backwards — silently un-ticking an
+  win by arriving last, overwriting the items _and_ dragging `rev` backwards — silently un-ticking an
   item the server had accepted, with its own echo already spent.
 
 Both were invisible to 360 green tests, and both are the same shape: a rule stated correctly in the
@@ -911,7 +916,7 @@ contract, implemented for the case the tests exercise, and not for the case a ba
 produces.
 
 **Consequence, and the reason this entry exists at all.** Every previous decision in this file that
-corrected a wrong belief — D-030, D-034 — was found by *executing* something. These were found by
+corrected a wrong belief — D-030, D-034 — was found by _executing_ something. These were found by
 somebody reading the code who had not written it. The mutation sweep is good at "is this guard
 load-bearing"; it is useless at "is there a guard missing here", because it can only break code that
 exists. Those are different questions and the project needs both. The reviewer is not a formality at
@@ -921,7 +926,7 @@ for most of a day — produced exactly the class of defect it exists to catch.
 ### M3, second pass: an untested guard turned out to be an unreached one
 
 The audit's ninth finding was filed as a coverage gap — "`safeNext` is thoroughly tested as a
-function, but nothing tests that login *calls* it. Replace `next()` with
+function, but nothing tests that login _calls_ it. Replace `next()` with
 `page.url.searchParams.get('next')` and the suite is green with an open redirect." Writing the
 missing test found a live defect rather than the absence of one: **the `next=` mechanism was inert
 entirely.** `await invalidateAll(); await goto(next())` re-runs the `(auth)` layout load with the
@@ -932,7 +937,7 @@ home is where the app sends you anyway. Now: `goto(target, { replaceState: true,
 browser lands.
 
 That is a sharper version of the same lesson: D-030's "correct guard, test that cannot reach it" has
-a worse sibling, the correct guard nothing reaches *at runtime either*. Only a test that exercises
+a worse sibling, the correct guard nothing reaches _at runtime either_. Only a test that exercises
 the caller can tell the two apart.
 
 The rest of the audit's findings were design drift against `docs/DESIGN.md` and the canvas, and are
@@ -971,9 +976,9 @@ POST /%61pi/admin/users   201   {"temporaryPassword":"…"} — a second admin
 ```
 
 After: every one of those is `403`, and `POST /api/auth/login`, the password change, and normal
-authenticated use are unaffected. §3.2 justifies this gate at length — *"the temporary password an
+authenticated use are unaffected. §3.2 justifies this gate at length — _"the temporary password an
 admin hands out over a chat app stays valid for the full 180-day absolute session TTL as soon as the
-member dismisses the prompt"* — which is exactly what it did, for anyone who encoded one letter.
+member dismisses the prompt"_ — which is exactly what it did, for anyone who encoded one letter.
 
 The fix is to match on `event.route.id`: the pattern SvelteKit actually resolved, already decoded and
 already canonical. The general lesson is worth stating plainly, because it will recur: **a security
@@ -989,18 +994,18 @@ redirects first, and a trap for the next person.
 D-030 exists for this and D-033 made mutation testing an exit criterion, and M2 shipped anyway with
 six protections that could be removed or weakened while all 371 tests stayed green:
 
-| Guard | Mutation that stayed green |
-|---|---|
-| per-IP login limit | delete `enforce(limiters.loginByIp, …)` |
-| passkey assertion limit | delete `enforce(limiters.passkeyAssertionByIp, …)` |
-| passkey options limit | delete `enforce(limiters.passkeyOptionsByIp, …)` |
-| constant-time compare | `timingSafeEqual(a, b)` → `a.toString('hex') === b.toString('hex')` |
-| session token entropy | `randomBytes(32)` → `randomBytes(4)` |
-| temporary-password CSPRNG | `randomInt(n)` → `Math.floor(Math.random() * n)` |
+| Guard                     | Mutation that stayed green                                          |
+| ------------------------- | ------------------------------------------------------------------- |
+| per-IP login limit        | delete `enforce(limiters.loginByIp, …)`                             |
+| passkey assertion limit   | delete `enforce(limiters.passkeyAssertionByIp, …)`                  |
+| passkey options limit     | delete `enforce(limiters.passkeyOptionsByIp, …)`                    |
+| constant-time compare     | `timingSafeEqual(a, b)` → `a.toString('hex') === b.toString('hex')` |
+| session token entropy     | `randomBytes(32)` → `randomBytes(4)`                                |
+| temporary-password CSPRNG | `randomInt(n)` → `Math.floor(Math.random() * n)`                    |
 
 Every one is now killed by a test, and each kill was verified by applying the mutation and watching
 it fail. Three of them needed a kind of test this project had not written before. The last three are
-*functionally identical* to the correct code — a timing side channel, a shorter secret that still
+_functionally identical_ to the correct code — a timing side channel, a shorter secret that still
 hashes to 64 hex characters, a predictable stream that satisfies every assertion about length and
 alphabet. No assertion on a return value can see any of them. `tests/auth/crypto-primitives.test.ts`
 therefore asserts **which primitive was called**, with `node:crypto` mocked in that file alone and
@@ -1018,7 +1023,7 @@ HTTP path it mirrors — it is run precisely when somebody may hold a session th
 username charset is enforced against the lowercased form, so a Cyrillic `а` can no longer produce an
 account an admin cannot tell from another over the phone; a duplicate credential id is `409` rather
 than `500`; the login response carries `no-store`, which it did not because `authenticated` is read
-from the *incoming* session; the rate limiter evicts its least recently touched tenth when a sweep
+from the _incoming_ session; the rate limiter evicts its least recently touched tenth when a sweep
 frees nothing, so a flood of distinct attacker-chosen keys can no longer grow the map without bound;
 and `requireSessionId` keeps its unreachable check with a comment saying why a test would be
 meaningless — it narrows a type by refusing to launder a null, and costs one comparison.
@@ -1040,13 +1045,13 @@ worth saying up front: nothing below is a step towards something else. Each deci
 
 ## D-038 — Web push: `web-push`, and a VAPID keypair the app generates for itself
 
-`BACKLOG.md` deferred push with a one-line reason: *"Web Push needs VAPID keys and a subscription
-table, and iOS requires the PWA to be installed first."* Two of those three are now paid for; the
+`BACKLOG.md` deferred push with a one-line reason: _"Web Push needs VAPID keys and a subscription
+table, and iOS requires the PWA to be installed first."_ Two of those three are now paid for; the
 third is a fact about iOS and is surfaced in the UI rather than worked around.
 
 **The keypair is generated on first use and stored in `server_keys`, not provisioned.** This is the
-first secret this application has ever held, and PROJECT.md §7 said flatly *"There is no application
-secret. Nothing to provision, rotate, or leak."* That sentence is now false as written, so it is
+first secret this application has ever held, and PROJECT.md §7 said flatly _"There is no application
+secret. Nothing to provision, rotate, or leak."_ That sentence is now false as written, so it is
 corrected rather than quietly left standing. What made it valuable, though, was never the absence of
 bytes — it was the absence of an **operator step**: no `openssl` invocation in a README, no value
 pasted into a compose file, nothing to forget when moving the deployment. Generating the keypair
@@ -1062,7 +1067,7 @@ AES-128-GCM — and the encryption is perhaps 150 lines. It is also exactly the 
 wrong in a way no test written by its author will catch, and the failure mode is silent: a
 notification that never arrives, or worse, one encrypted under a scheme that a push service accepts
 today. The project's own rule about crypto primitives (D-037: some properties are invisible to
-black-box tests) argues *against* writing this ourselves. `web-push` is pure JavaScript, so D-002's
+black-box tests) argues _against_ writing this ourselves. `web-push` is pure JavaScript, so D-002's
 "no native module to compile" survives; it is the first runtime dependency added since M2.
 
 **Consequence for the threat model.** A database disclosure now yields something usable: the VAPID
@@ -1075,15 +1080,15 @@ because the population is under ten people.
 
 ## D-039 — Anti-spam: a trailing quiet window per store, not a per-notification cooldown
 
-The requirement was *"only send if something new is added and there hasn't been a change for X
-minutes."* Two mechanisms satisfy that sentence and they behave very differently.
+The requirement was _"only send if something new is added and there hasn't been a change for X
+minutes."_ Two mechanisms satisfy that sentence and they behave very differently.
 
 A **leading-edge cooldown** ("send now, then suppress for X minutes") delivers instantly and then
-throws away everything that follows. The buzz says *"Migros: milk"* and the four things added
+throws away everything that follows. The buzz says _"Migros: milk"_ and the four things added
 afterwards are never mentioned. It is the same number of interruptions with less information in them.
 
 A **trailing quiet window** — R-21, what is built — holds the batch until the list has stopped
-changing, then sends *"Migros: milk, bread and 4 more."* The message is the interesting one precisely
+changing, then sends _"Migros: milk, bread and 4 more."_ The message is the interesting one precisely
 because it did not exist until the person finished typing. The cost is latency: with the default
 five-minute window, a notification arrives five minutes after the last edit. For a shopping list that
 is nothing; nobody is dispatched by push.
@@ -1115,7 +1120,7 @@ the feature exists to hide. This extends to name collisions: `409 STORE_NAME_TAK
 the colliding store's id so the client can offer to un-archive it, and against an invisible store it
 must not (R-22).
 
-**Admins are not exempt.** The owner asked for *"ONLY VISIBLE TO THAT SPECIFIC USER"*, and an admin
+**Admins are not exempt.** The owner asked for _"ONLY VISIBLE TO THAT SPECIFIC USER"_, and an admin
 bypass makes that sentence false — in a household where the admin is a family member, it makes it
 false in exactly the case the member cares about. The cost is real and is documented rather than
 mitigated: if a member privatises a shared store and stops using the app, **no API call brings it
@@ -1129,7 +1134,7 @@ could become private-to-nobody).
 
 ## D-041 — A claim belongs to the trip, so nothing has to expire it
 
-*"Not permanently, just for a trip."* The columns therefore live on `trips`, not on `stores`.
+_"Not permanently, just for a trip."_ The columns therefore live on `trips`, not on `stores`.
 
 R-6 already opens a fresh trip whenever one closes, and a fresh trip's claim columns are `NULL`. So
 the claim expires exactly when the shopping run ends, with **no timer, no TTL and no background
@@ -1142,9 +1147,9 @@ rejects for exactly the reason that nothing would read it).
 
 `takeover: true` rather than a silently-stealable claim: a claim you can overwrite without noticing
 is not a claim. A plain `POST` against someone else's claim is `409 TRIP_CLAIMED` whose message names
-the holder, so the client can offer *"take over anyway"* in one tap without a second round trip.
+the holder, so the client can offer _"take over anyway"_ in one tap without a second round trip.
 
-The note is 140 characters of plain text. It is a *"I'll only get the milk"* note, not a message
+The note is 140 characters of plain text. It is a _"I'll only get the milk"_ note, not a message
 board — the backlog's rejection of chat features stands.
 
 ## D-042 — Locale is a user column, negotiated from `Accept-Language` exactly once
@@ -1164,7 +1169,7 @@ the column is the only source, and the member changes it on `/you`.
 
 Delivered by the root `load` so the first paint is already in the right language. PROJECT.md §13
 records the theme-flash bug of exactly this shape; reproducing it for language would be worse, since
-a flash of the wrong *language* is a flash of an unreadable app.
+a flash of the wrong _language_ is a flash of an unreadable app.
 
 No i18n library. Three languages and a few hundred strings is a typed object and a `t()`; a library
 would add a dependency, a build step or a runtime store to a project whose whole stack argument is
@@ -1193,7 +1198,7 @@ the code, and those are the ones worth recording.
 
 **Uniqueness must have the same scope as visibility, or the constraint becomes an oracle.**
 `stores.name_key` was `UNIQUE` table-wide, so a member could type a name, read
-`409 STORE_NAME_TAKEN`, see no such shop in their own list, and conclude that somebody had a *private*
+`409 STORE_NAME_TAKEN`, see no such shop in their own list, and conclude that somebody had a _private_
 shop called that. R-22 had carefully withheld the store's **id** while the response handed over its
 **name**, which is the more sensitive of the two — "Eczane" says something the id never could. The
 same table-wide key also meant two members could not both have a shop called Migros if either kept
@@ -1236,7 +1241,7 @@ what is enforced is worse than one nobody enforces, because it is trusted.
 
 ## D-045 — Deleting a store is permanent, cascades through the schema, and is not admin-gated
 
-*(M7. Contract addendum §9.)*
+_(M7. Contract addendum §9.)_
 
 Archiving was built as the answer to "I do not want to see this shop" and it is the right answer to
 that question. It is not an answer to "this shop was a mistake, or was for a house we moved out of,
@@ -1257,14 +1262,14 @@ and a test that counts rows in all three tables before and after.
 sounds safer and is not, for this brief: the household is fewer than ten people who already trust each
 other with every list, and D-007 already refused a mechanism (account lockout) that lets a family lock
 itself out of its own app. Restricting deletion would mean the person who created a shop by accident
-cannot remove it without finding whoever holds the admin flag. What *is* enforced is exactly what §8.4
+cannot remove it without finding whoever holds the admin flag. What _is_ enforced is exactly what §8.4
 already enforces everywhere else: a store private to somebody else cannot be deleted, **and being an
 admin does not change that** (D-040 is unchanged, and now has a DELETE row in its test table).
 
 **The confirmation is in the interface, not in the protocol.** No confirmation token, no
 `?really=true`, no "type the shop name". A token in the request would be protocol surface that exists
 to compensate for a screen, and it protects nothing an API client could not send twice. What actually
-prevents the accident is that the destructive tap is a *second* tap, on a *different* button, with
+prevents the accident is that the destructive tap is a _second_ tap, on a _different_ button, with
 different words, and that the armed state does not survive closing the sheet. That is a UI rule, so
 §9.4 states it in the contract as a UI rule and the e2e suite asserts each clause — including that
 reopening shop settings does not leave "Delete permanently" one tap away.
@@ -1297,7 +1302,7 @@ So the field now takes a principal: the member named by `stores.created_by`, or 
 
 **Why the creator, when D-045 explicitly refused to give a public store an owner.** These are
 different questions and it is worth being precise, because the two decisions look contradictory.
-D-045 refused an owner for *deletion*, on the grounds that a household of fewer than ten people who
+D-045 refused an owner for _deletion_, on the grounds that a household of fewer than ten people who
 already share every list should not need to hunt for a specific person to undo their own accident —
 and deletion is symmetric: whoever does it, everybody loses the shop equally, and everybody can see
 that it happened. Privatising is **asymmetric**: one member keeps the shop and the rest cannot tell
@@ -1305,12 +1310,12 @@ it from a shop that never existed. `created_by` is not being introduced as an ow
 it is the only principal in the row who can be relied on to still see the store afterwards.
 
 **Why admins too, when D-040 is emphatic that admins get no visibility exemption.** Because this is
-not a visibility exemption. §8.4 is resolved *first* and unchanged: an admin who cannot see a store
+not a visibility exemption. §8.4 is resolved _first_ and unchanged: an admin who cannot see a store
 gets the same byte-identical 404 as anybody else, so the exemption can only ever apply to a store the
 admin can already see — a shared one. What it buys is a way to undo a privatisation that should not
 have happened, on a shop the whole family was using, without a database prompt. What it explicitly
 does not buy is any path into a store private to another member; a test asserts the 404, and it
-asserts it *for the admin*.
+asserts it _for the admin_.
 
 **Rejected: a 403 that names the store, or a message explaining who the creator is.** The refusal is
 `403 FORBIDDEN` with no sibling field, and the client's copy says "the member who created this shop,
@@ -1368,7 +1373,7 @@ suite asserts.
 
 **Why these eight.** Three are the ones that existed (`auto`, `light`, `dark`). Two more are the same
 paper under different light (`sepia`, `sage`) and stay on the light family's store palette, because
-`stores.color` is a *shared* choice — a shop should look like the same shop to everybody looking at
+`stores.color` is a _shared_ choice — a shop should look like the same shop to everybody looking at
 it. Two are dark (`indigo`, `plum`) and inherit the dark store palette wholesale, grouped in one
 selector list so twenty-four palette tokens are not written out three times and left to drift. The
 eighth, `contrast`, is not a taste option: it is black borders and black text for a phone in direct
@@ -1389,7 +1394,7 @@ milestones after that was true. Three things wanted one: a member saying which b
 on, an operator comparing two containers, and an agent picking the project up cold and needing to
 know what "last" means.
 
-**`0.<milestone>.<patch>`, and the minor number *is* the milestone.** Rejected: semver by
+**`0.<milestone>.<patch>`, and the minor number _is_ the milestone.** Rejected: semver by
 compatibility. Semver's minor/patch distinction describes what a change does to an API's consumers,
 and this API has exactly one consumer — its own frontend, shipped in the same image, from the same
 commit. There is no version skew to describe, so a scheme built to describe it would be decoration
@@ -1454,7 +1459,7 @@ edit icon) and already carries the store name as secondary metadata — authorsh
 competing with the checkbox.
 
 Known limitation, not created by this decision but exposed by it: the detail sheet only opens from a
-*pending* row — `ItemRow` shows Undo instead of the edit icon once an item is ticked — so there is
+_pending_ row — `ItemRow` shows Undo instead of the edit icon once an item is ticked — so there is
 currently no way to see who added an item once it is in the basket. Recorded in PROJECT.md §13 rather
 than worked around here, because fixing it means changing what a ticked row's tap targets do, which is
 a separate decision from where authorship is displayed.
@@ -1501,9 +1506,9 @@ purpose.
 
 **Why a private shop hides it, not just relocates it.** The owner's second point extends `stores.private_to`'s
 consequence (§8.4) one step further than D-049 did. D-049 already reasoned that a private shop's one
-possible reader is also its one possible *claimant*, and removed the claim strip on that basis. The
+possible reader is also its one possible _claimant_, and removed the claim strip on that basis. The
 identical fact — one reader, and every store-scoped write requires being that one member (§8.4) — also
-makes that reader the shop's only possible *author*. "Added by admin" on a shop only admin can ever add
+makes that reader the shop's only possible _author_. "Added by admin" on a shop only admin can ever add
 to is not a fact about the item, it is a restatement of who is looking at the screen. The missed
 symmetry was mine, not a new rule the owner invented: D-049 solved this exact shape for the claim strip
 and simply was not asked to check whether the same shape recurred elsewhere in the same milestone. It
@@ -1513,3 +1518,26 @@ did.
 down to both `<ItemRow>` call sites — the same guard shape as the claim strip's
 `{#if store?.visibility !== 'private'}`, applied one component lower. No new i18n key: `itemAddedBy`
 already existed for the sheet and reads identically on the row.
+
+## D-051 — Suggestions come from bought history; duplicates warn but remain legal
+
+**Status:** accepted (M10). **Contract:** §12.
+
+Recent suggestions use only ticked history from the same shop. This is the least surprising meaning
+of “recent”: it offers things the family actually bought, not an item they deleted or one that keeps
+carrying because nobody wants it. Names already on the open list are omitted, and Unicode identity is
+decided in application code with NFKC, lowercase and whitespace collapse because SQLite `NOCASE` is
+not Turkish-aware. Rejected: FTS5, a stored popularity counter, and a new table. Eight suggestions do
+not justify any of them for a household database.
+
+The same normalisation powers a compose-time duplicate warning. It is deliberately not a uniqueness
+constraint and not a server refusal: “Milk · 1 litre” and “Milk · lactose-free” can both be right.
+The warning makes an accidental double-add visible; the explicit second submit preserves the escape
+hatch.
+
+Offline localisation stores no authenticated page and no shopping data. The application tells the
+service worker one closed-set locale value, which selects one of three public static pages. Rejected:
+caching the last rendered page (the privacy boundary §5 forbids), using the device language after the
+member chose another, and a locale cookie introduced solely for a worker that already has a message
+channel to the signed-in client. Locale-specific manifests are selected in the existing server-side
+HTML transform, so install metadata agrees with the member before hydration.

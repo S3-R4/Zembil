@@ -76,6 +76,9 @@ export const en = {
 	addBusy: 'Adding…',
 	addAdded: (name: string) => `Added “${name}”. Next?`,
 	addShopLegend: 'Shop',
+	addRecent: 'Bought here recently',
+	addDuplicate: (name: string) => `“${name}” is already on this list.`,
+	addDuplicateAnyway: 'Add another anyway',
 
 	// ---- new shop -------------------------------------------------------
 	newShopTitle: 'Add a shop',
@@ -99,7 +102,10 @@ export const en = {
 	listEmptyBody: 'Add the first thing you need here.',
 	listDivider: (n: number) => `In the basket · ${n}`,
 	listFinish: (n: number) =>
-		plural(L, n, { one: `Finish trip · ${n} bought`, other: `Finish trip · ${n} bought` }),
+		plural(L, n, {
+			one: `Finish trip · ${n} bought`,
+			other: `Finish trip · ${n} bought`
+		}),
 	listAddItem: 'Add an item',
 
 	itemSheetTitle: 'Item',
@@ -108,7 +114,15 @@ export const en = {
 	rowUndo: 'Undo',
 	rowEdit: (name: string) => `Edit ${name}`,
 	rowCarried: (n: number) =>
-		plural(L, n, { one: `Carried over ${n} time`, other: `Carried over ${n} times` }),
+		plural(L, n, {
+			one: `Carried over ${n} time`,
+			other: `Carried over ${n} times`
+		}),
+	rowCarriedNudge: (n: number) =>
+		plural(L, n, {
+			one: `Still needed after ${n} trip`,
+			other: `Still needed after ${n} trips`
+		}),
 
 	finishTitle: 'Finish this trip?',
 	finishBought: (n: number) =>
@@ -119,6 +133,11 @@ export const en = {
 			other: `${n} things still on the list will move to the next trip here.`
 		}),
 	finishNothingLeft: 'Nothing is left behind.',
+	finishCarriedAgain: (n: number) =>
+		plural(L, n, {
+			one: `${n} of them has already carried over before.`,
+			other: `${n} of them have already carried over before.`
+		}),
 	finishConfirm: 'Finish trip',
 	finishBusy: 'Finishing…',
 	finishKeep: 'Keep shopping',
@@ -190,9 +209,11 @@ export const en = {
 	tripShoppedBy: (name: string) => `picked up by ${name}`,
 	tripBought: (n: number) => plural(L, n, { one: `${n} bought`, other: `${n} bought` }),
 	tripLeft: (n: number) =>
-		plural(L, n, { one: `${n} left on the list`, other: `${n} left on the list` }),
-	tripSeeItems: (n: number) =>
-		plural(L, n, { one: `See ${n} item`, other: `See ${n} items` }),
+		plural(L, n, {
+			one: `${n} left on the list`,
+			other: `${n} left on the list`
+		}),
+	tripSeeItems: (n: number) => plural(L, n, { one: `See ${n} item`, other: `See ${n} items` }),
 	tripHideItems: 'Hide items',
 	tripItemLeft: 'left',
 
@@ -257,7 +278,10 @@ export const en = {
 	adminDisabled: (when: string) => `Disabled ${when}`,
 	adminPasswordOnly: 'Active · password only',
 	adminPasskeys: (n: number) =>
-		plural(L, n, { one: `Active · ${n} passkey`, other: `Active · ${n} passkeys` }),
+		plural(L, n, {
+			one: `Active · ${n} passkey`,
+			other: `Active · ${n} passkeys`
+		}),
 	adminReset: 'Reset password',
 	adminRemovePasskeys: 'Remove passkeys',
 	adminMakeAdmin: 'Make admin',

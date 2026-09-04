@@ -13,6 +13,7 @@
 	import { ApiError, newClientId } from '$lib/client/api';
 	import { messages } from '$lib/client/i18n';
 	import { STORE_COLORS } from '$lib/client/palette';
+	import { itemNameKey } from '$lib/item-name';
 	import Banner from '$lib/components/Banner.svelte';
 	import ItemRow from '$lib/components/ItemRow.svelte';
 	import Sheet from '$lib/components/Sheet.svelte';
@@ -55,11 +56,19 @@
 	// compose" precise — see submitAdd.
 	let clientId = $state(newClientId());
 	let failedFor = $state<string | null>(null);
+	let duplicateArmedKey = $state<string | null>(null);
+	let duplicateKey = $derived(itemNameKey(draftName));
+	let duplicate = $derived(duplicateKey.length > 0 && list.hasActiveName(draftName));
+	let visibleSuggestions = $derived(list.suggestions.filter((name) => !list.hasActiveName(name)));
 
 	async function submitAdd(event: SubmitEvent) {
 		event.preventDefault();
 		const name = draftName.trim();
 		if (addBusy || name.length === 0) return;
+		if (duplicate && duplicateArmedKey !== duplicateKey) {
+			duplicateArmedKey = duplicateKey;
+			return;
+		}
 		// A previous attempt failed and the member has since typed something else.
 		// That is a NEW item, not a retry: reusing the old clientId would make the
 		// server answer 200 with the item the earlier attempt actually committed —
@@ -78,12 +87,14 @@
 			justAdded = added.name;
 			draftName = '';
 			draftNote = '';
+			duplicateArmedKey = null;
 			clientId = newClientId();
 			failedFor = null;
 			// The sheet stays open and the caret goes back to the name field. This
 			// is the whole point of the sheet.
 			nameInput?.focus();
 			void shops.load();
+			void list.loadSuggestions();
 		} catch (err) {
 			// The clientId is deliberately NOT regenerated: while the text is
 			// unchanged this is still the same compose, and the next attempt must be
@@ -99,6 +110,13 @@
 		addError = null;
 		justAdded = null;
 		adding = true;
+		void list.loadSuggestions();
+	}
+
+	function chooseSuggestion(name: string) {
+		draftName = name;
+		duplicateArmedKey = null;
+		nameInput?.focus();
 	}
 
 	// ---- item detail ------------------------------------------------------
@@ -220,6 +238,9 @@
 			claiming = false;
 		} catch (err) {
 			claimError = messageOf(err);
+			// Direct release lives outside the sheet. A failure there belongs in the
+			// visible list banner, not in a closed sheet's private error slot.
+			if (!claiming) list.error = claimError;
 		} finally {
 			claimBusy = false;
 		}
@@ -312,6 +333,7 @@
 
 	let boughtCount = $derived(ticked.length);
 	let leftCount = $derived(pending.length);
+	let repeatedLeftCount = $derived(pending.filter((item) => item.carryCount > 0).length);
 
 	/** The claim line under the title. `claimedByName` is a display name; §8.6
 	 *  adds `claimedByMe` precisely because two members can share one. */
@@ -385,23 +407,28 @@
   simply not useful there, so it does not render.
 -->
 {#if store?.visibility !== 'private'}
-<div class="claim" class:mine={store?.claimedByMe}>
-	<div class="claim-text">
-		<p class="claim-who">{claimLine}</p>
-		{#if store?.claimNote}
-			<p class="claim-note">“{store.claimNote}”</p>
+	<div class="claim" class:mine={store?.claimedByMe}>
+		<div class="claim-text">
+			<p class="claim-who">{claimLine}</p>
+			{#if store?.claimNote}
+				<p class="claim-note">“{store.claimNote}”</p>
+			{/if}
+		</div>
+		{#if store?.claimedByMe}
+			<div class="claim-actions">
+				<button class="claim-btn" type="button" disabled={claimBusy} onclick={openClaim}>
+					{m.claimEdit}
+				</button>
+				<button class="claim-btn release" type="button" disabled={claimBusy} onclick={releaseClaim}>
+					{m.claimRelease}
+				</button>
+			</div>
+		{:else}
+			<button class="claim-btn" type="button" disabled={claimBusy} onclick={openClaim}>
+				{store?.claimedByName ? m.claimTakeOver : m.claimGo}
+			</button>
 		{/if}
 	</div>
-	{#if store?.claimedByMe}
-		<button class="claim-btn" type="button" disabled={claimBusy} onclick={openClaim}>
-			{m.claimEdit}
-		</button>
-	{:else}
-		<button class="claim-btn" type="button" disabled={claimBusy} onclick={openClaim}>
-			{store?.claimedByName ? m.claimTakeOver : m.claimGo}
-		</button>
-	{/if}
-</div>
 {/if}
 
 <div class="body">
@@ -478,6 +505,19 @@
 			autofocus
 			bind:value={draftName}
 		/>
+		{#if duplicate}
+			<p class="duplicate" role="status">{m.addDuplicate(draftName.trim())}</p>
+		{/if}
+		{#if visibleSuggestions.length > 0 && draftName.trim().length === 0}
+			<fieldset class="suggestions">
+				<legend class="z-eyebrow">{m.addRecent}</legend>
+				<div>
+					{#each visibleSuggestions as suggestion (suggestion)}
+						<button type="button" onclick={() => chooseSuggestion(suggestion)}>{suggestion}</button>
+					{/each}
+				</div>
+			</fieldset>
+		{/if}
 		<label class="sr-only" for="item-note">{m.addNotePlaceholder}</label>
 		<input
 			class="z-field"
@@ -488,7 +528,13 @@
 			bind:value={draftNote}
 		/>
 		<button class="z-btn" type="submit" disabled={addBusy || draftName.trim().length === 0}>
-			{addBusy ? m.addBusy : store?.name ? m.addSubmit(store.name) : m.addSubmitAny}
+			{addBusy
+				? m.addBusy
+				: duplicate && duplicateArmedKey === duplicateKey
+					? m.addDuplicateAnyway
+					: store?.name
+						? m.addSubmit(store.name)
+						: m.addSubmitAny}
 		</button>
 	</form>
 </Sheet>
@@ -511,7 +557,12 @@
 		<button class="z-btn" type="submit" disabled={editBusy || editName.trim().length === 0}>
 			{editBusy ? m.saving : m.save}
 		</button>
-		<button class="z-btn z-btn--tertiary z-btn--danger" type="button" disabled={editBusy} onclick={deleteItem}>
+		<button
+			class="z-btn z-btn--tertiary z-btn--danger"
+			type="button"
+			disabled={editBusy}
+			onclick={deleteItem}
+		>
 			{m.delete}
 		</button>
 	</form>
@@ -520,11 +571,20 @@
 <!-- Claim (§8.6). One optional short note, plain text, 140 characters. -->
 <Sheet
 	open={claiming}
-	title={claimConflict ? m.claimSheetTakeOver : store?.claimedByMe ? m.claimSheetEdit : m.claimSheetGo}
+	title={claimConflict
+		? m.claimSheetTakeOver
+		: store?.claimedByMe
+			? m.claimSheetEdit
+			: m.claimSheetGo}
 	onclose={() => (claiming = false)}
 >
 	<Banner message={claimError} />
-	<form onsubmit={(e) => { e.preventDefault(); void submitClaim(claimConflict); }}>
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			void submitClaim(claimConflict);
+		}}
+	>
 		<label class="sr-only" for="claim-note">{m.claimNoteLabel}</label>
 		<input
 			class="z-field"
@@ -691,6 +751,9 @@
 		{m.finishBought(boughtCount)}
 		{leftCount > 0 ? m.finishLeft(leftCount) : m.finishNothingLeft}
 	</p>
+	{#if repeatedLeftCount > 0}
+		<p class="carry-warning">{m.finishCarriedAgain(repeatedLeftCount)}</p>
+	{/if}
 	<button class="z-btn" type="button" disabled={finishBusy} onclick={finishTrip}>
 		{finishBusy ? m.finishBusy : m.finishConfirm}
 	</button>
@@ -770,6 +833,54 @@
 		font-size: 15px;
 		font-weight: 700;
 		color: var(--accent);
+	}
+
+	.claim-actions {
+		flex: none;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 2px;
+	}
+
+	.claim-btn.release {
+		color: var(--danger);
+	}
+
+	.duplicate,
+	.carry-warning {
+		margin: -4px 2px 0;
+		color: var(--accent-deep);
+		font-size: 15px;
+		font-weight: 700;
+	}
+
+	.suggestions {
+		border: 0;
+		margin: 0;
+		padding: 0;
+	}
+
+	.suggestions legend {
+		margin-bottom: 8px;
+	}
+
+	.suggestions div {
+		display: flex;
+		gap: 8px;
+		overflow-x: auto;
+		padding-bottom: 2px;
+	}
+
+	.suggestions button {
+		flex: none;
+		min-height: 44px;
+		padding: 0 14px;
+		border-radius: 14px;
+		background: var(--surface-muted);
+		color: var(--text-2);
+		font-size: 15px;
+		font-weight: 600;
 	}
 
 	.faint {

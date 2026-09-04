@@ -12,7 +12,9 @@ const ORIGIN = 'https://zembil.example.com';
 const PRECACHE = [
 	'/_app/immutable/entry/app.abc123.js',
 	'/fonts/dm-sans-latin.woff2',
-	'/offline.html'
+	'/offline-en.html',
+	'/offline-tr.html',
+	'/offline-de.html'
 ];
 
 const strategy = (over: Partial<Parameters<typeof cacheStrategy>[0]> = {}) =>
@@ -62,8 +64,8 @@ describe('never an authenticated document', () => {
 	});
 
 	it('does not fall through to the asset branch even for a precached path', () => {
-		// Nothing may reach 'asset' with mode 'navigate' — not even /offline.html.
-		expect(strategy({ url: `${ORIGIN}/offline.html`, mode: 'navigate' })).toBe('navigate');
+		// Nothing may reach 'asset' with mode 'navigate' — not even a static offline page.
+		expect(strategy({ url: `${ORIGIN}/offline-en.html`, mode: 'navigate' })).toBe('navigate');
 	});
 });
 
@@ -83,9 +85,9 @@ describe('assets', () => {
 		expect(strategy({ url: `${ORIGIN}/fonts/` })).toBe('bypass');
 		// ...and neither is a LONGER one that happens to start with one. This is
 		// the direction a `startsWith` check gets wrong, and it is the direction
-		// that matters: `/offline.html/…` is a path we never listed.
-		expect(strategy({ url: `${ORIGIN}/offline.html.map` })).toBe('bypass');
-		expect(strategy({ url: `${ORIGIN}/offline.html/anything` })).toBe('bypass');
+		// that matters: `/offline-en.html/…` is a path we never listed.
+		expect(strategy({ url: `${ORIGIN}/offline-en.html.map` })).toBe('bypass');
+		expect(strategy({ url: `${ORIGIN}/offline-en.html/anything` })).toBe('bypass');
 		expect(strategy({ url: `${ORIGIN}/fonts/dm-sans-latin.woff2.bak` })).toBe('bypass');
 	});
 });
@@ -93,13 +95,13 @@ describe('assets', () => {
 describe('everything else', () => {
 	it('bypasses any method but GET', () => {
 		for (const method of ['POST', 'PATCH', 'DELETE', 'HEAD', 'PUT']) {
-			expect(strategy({ method, url: `${ORIGIN}/offline.html` }), method).toBe('bypass');
+			expect(strategy({ method, url: `${ORIGIN}/offline-en.html` }), method).toBe('bypass');
 		}
 	});
 
 	it('bypasses another origin', () => {
-		expect(strategy({ url: 'https://evil.example/offline.html' })).toBe('bypass');
-		expect(strategy({ url: 'http://zembil.example.com/offline.html' })).toBe('bypass');
+		expect(strategy({ url: 'https://evil.example/offline-en.html' })).toBe('bypass');
+		expect(strategy({ url: 'http://zembil.example.com/offline-en.html' })).toBe('bypass');
 	});
 
 	it('bypasses an unparseable URL rather than throwing inside the worker', () => {
@@ -109,10 +111,12 @@ describe('everything else', () => {
 
 describe('factsFor — the mapping, not the rule', () => {
 	it('reads the real method, url and mode off the request', () => {
-		const request = new Request(`${ORIGIN}/offline.html`, { method: 'POST' });
+		const request = new Request(`${ORIGIN}/offline-en.html`, {
+			method: 'POST'
+		});
 		const facts = factsFor(request, ORIGIN, PRECACHE);
 		expect(facts.method).toBe('POST');
-		expect(facts.url).toBe(`${ORIGIN}/offline.html`);
+		expect(facts.url).toBe(`${ORIGIN}/offline-en.html`);
 		expect(facts.origin).toBe(ORIGIN);
 		expect(facts.precache).toBe(PRECACHE);
 		// A hardcoded 'GET' here would let every POST into the cache, and no
@@ -121,7 +125,7 @@ describe('factsFor — the mapping, not the rule', () => {
 	});
 
 	it('passes the worker own origin through, not the request one', () => {
-		const request = new Request('https://evil.example/offline.html');
+		const request = new Request('https://evil.example/offline-en.html');
 		const facts = factsFor(request, ORIGIN, PRECACHE);
 		expect(facts.origin).toBe(ORIGIN);
 		expect(cacheStrategy(facts)).toBe('bypass');

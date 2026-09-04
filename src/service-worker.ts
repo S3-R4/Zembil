@@ -11,9 +11,8 @@
  * (§5) says the same thing; this is the half of it that does not depend on the
  * browser honouring a header inside a worker we wrote ourselves.
  *
- * So the cache holds exactly three kinds of thing, all of them public and all
- * of them versioned or immutable: the hashed build assets, the static files,
- * and one static offline page.
+ * So the cache holds public versioned/immutable assets, three static offline
+ * pages, and one closed-set locale preference containing no account data.
  *
  * The `push` and `notificationclick` handlers added for §8.7 do not change any
  * of that: they read a payload the server encrypted for this browser, show it,
@@ -23,13 +22,43 @@ import { build, files, version } from '$service-worker';
 import { cacheStrategy, factsFor } from '$lib/client/cache-policy';
 
 const CACHE = `zembil-${version}`;
-const OFFLINE = '/offline.html';
+const OFFLINE = {
+	en: '/offline-en.html',
+	tr: '/offline-tr.html',
+	de: '/offline-de.html'
+} as const;
+const LOCALE_KEY = '/__zembil-offline-locale';
+type OfflineLocale = keyof typeof OFFLINE;
 
 /** Hashed build output plus static assets. Both are public by construction:
  *  anything in `static/` is served to anyone who asks for it, signed in or not. */
 const PRECACHE = [...build, ...files];
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
+
+const isOfflineLocale = (value: unknown): value is OfflineLocale =>
+	value === 'en' || value === 'tr' || value === 'de';
+
+async function offlineLocale(): Promise<OfflineLocale> {
+	const response = await caches.match(LOCALE_KEY);
+	const value = response ? await response.text() : '';
+	return isOfflineLocale(value) ? value : 'en';
+}
+
+sw.addEventListener('message', (event) => {
+	const data = event.data as { type?: unknown; locale?: unknown } | null;
+	if (!data || data.type !== 'locale.changed' || !isOfflineLocale(data.locale)) return;
+	event.waitUntil(
+		caches.open(CACHE).then((cache) =>
+			cache.put(
+				LOCALE_KEY,
+				new Response(data.locale, {
+					headers: { 'content-type': 'text/plain; charset=utf-8' }
+				})
+			)
+		)
+	);
+});
 
 sw.addEventListener('install', (event) => {
 	event.waitUntil(
@@ -73,10 +102,13 @@ sw.addEventListener('fetch', (event) => {
 				try {
 					return await fetch(request);
 				} catch {
-					const cached = await caches.match(OFFLINE);
+					const cached = await caches.match(OFFLINE[await offlineLocale()]);
 					return (
 						cached ??
-						new Response('Offline', { status: 503, headers: { 'content-type': 'text/plain' } })
+						new Response('Offline', {
+							status: 503,
+							headers: { 'content-type': 'text/plain' }
+						})
 					);
 				}
 			})()
@@ -184,7 +216,10 @@ sw.addEventListener('notificationclick', (event) => {
 			// payload composer.
 			if (url.origin !== sw.location.origin) return;
 
-			const clients = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
+			const clients = await sw.clients.matchAll({
+				type: 'window',
+				includeUncontrolled: true
+			});
 
 			// Focus a tab that is already on this list, rather than opening a second
 			// one — a family member who taps three notifications should end up with

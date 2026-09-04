@@ -29,7 +29,10 @@ afterEach(() => h.close());
 
 const resolved = async () => new Response('{"ok":true}', { status: 200 });
 
-function run(options: Parameters<typeof routeEvent>[0], resolveFn = resolved) {
+function run(
+	options: Parameters<typeof routeEvent>[0],
+	resolveFn: (...args: any[]) => Promise<Response> = resolved
+) {
 	const event = routeEvent(options);
 	return (handle as any)({ event, resolve: resolveFn });
 }
@@ -41,7 +44,11 @@ describe('Origin check (§3)', () => {
 	});
 
 	it('REJECTS a mutation with a missing Origin, never letting it through', async () => {
-		const response = await run({ method: 'POST', path: '/api/stores', origin: null });
+		const response = await run({
+			method: 'POST',
+			path: '/api/stores',
+			origin: null
+		});
 		expect(response.status).toBe(403);
 		expect((await bodyOf(response)).error.code).toBe('ORIGIN_MISMATCH');
 	});
@@ -54,19 +61,27 @@ describe('Origin check (§3)', () => {
 			`${TEST_ORIGIN}.evil`,
 			''
 		]) {
-			const response = await run({ method: 'POST', path: '/api/stores', origin });
+			const response = await run({
+				method: 'POST',
+				path: '/api/stores',
+				origin
+			});
 			expect(response.status, origin).toBe(403);
 		}
 	});
 
 	it('covers every mutating method, not only POST', async () => {
 		for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-			const response = await run({ method, path: '/api/items/x', origin: null });
+			const response = await run({
+				method,
+				path: '/api/items/x',
+				origin: null
+			});
 			expect(response.status, method).toBe(403);
 		}
 	});
 
-	it('covers a JSON content type, which SvelteKit\'s own check ignores entirely', async () => {
+	it("covers a JSON content type, which SvelteKit's own check ignores entirely", async () => {
 		const response = await run({
 			method: 'POST',
 			path: '/api/stores',
@@ -77,16 +92,20 @@ describe('Origin check (§3)', () => {
 	});
 
 	it('does not apply to GET', async () => {
-		const response = await run({ method: 'GET', path: '/api/stores', origin: null });
+		const response = await run({
+			method: 'GET',
+			path: '/api/stores',
+			origin: null
+		});
 		expect(response.status).toBe(200);
 	});
 
 	it('exempts GET /api/health alone (§3.8)', async () => {
 		expect((await run({ method: 'GET', path: '/api/health', origin: null })).status).toBe(200);
 		// And the exemption is the health PATH, not a prefix of it.
-		expect(
-			(await run({ method: 'POST', path: '/api/healthcheck', origin: null })).status
-		).toBe(403);
+		expect((await run({ method: 'POST', path: '/api/healthcheck', origin: null })).status).toBe(
+			403
+		);
 	});
 });
 
@@ -136,11 +155,35 @@ describe('session resolution (§5)', () => {
 		});
 		expect(Number(cookies.jar.get(cookieName())!.opts.maxAge)).toBeGreaterThan(29 * 24 * 3600);
 	});
+
+	it('substitutes the member locale into html, manifest and metadata before first paint', async () => {
+		h.db.prepare("UPDATE users SET locale = 'tr' WHERE id = ?").run(ayse.id);
+		const session = signIn(h.db, ayse.id);
+		const response = await run(
+			{ method: 'GET', path: '/', cookies: cookiesWithSession(session.token) },
+			async (_event: unknown, options: any) =>
+				new Response(
+					options.transformPageChunk({
+						html: '<html lang="%zembil.lang%"><meta content="%zembil.description%"><link href="/manifest-%zembil.lang%.webmanifest"><body data-theme="%zembil.theme%">',
+						done: true
+					})
+				)
+		);
+		const html = await response.text();
+		expect(html).toContain('<html lang="tr">');
+		expect(html).toContain('Ailenin alışveriş listesi.');
+		expect(html).toContain('/manifest-tr.webmanifest');
+		expect(html).not.toContain('%zembil.');
+	});
 });
 
 describe('security headers (§5)', () => {
 	it('sets the four headers on every response', async () => {
-		const response = await run({ method: 'GET', path: '/api/health', origin: null });
+		const response = await run({
+			method: 'GET',
+			path: '/api/health',
+			origin: null
+		});
 		expect(response.headers.get('Referrer-Policy')).toBe('same-origin');
 		expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
 		expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
@@ -178,7 +221,11 @@ describe('security headers (§5)', () => {
 	});
 
 	it('applies the headers to a response the hook itself produced', async () => {
-		const response = await run({ method: 'POST', path: '/api/stores', origin: null });
+		const response = await run({
+			method: 'POST',
+			path: '/api/stores',
+			origin: null
+		});
 		expect(response.status).toBe(403);
 		expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
 	});
@@ -191,7 +238,12 @@ describe('must_change_password (§3.2)', () => {
 
 	const withFlag = (method: string, path: string, routeId?: string) => {
 		const session = signIn(h.db, ayse.id);
-		return run({ method, path, routeId, cookies: cookiesWithSession(session.token) });
+		return run({
+			method,
+			path,
+			routeId,
+			cookies: cookiesWithSession(session.token)
+		});
 	};
 
 	it('blocks every other API endpoint with 403 PASSWORD_CHANGE_REQUIRED', async () => {

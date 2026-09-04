@@ -15,8 +15,12 @@
 		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-title" content="Zembil" />
-		<meta name="description" content="The family shopping list." />
-		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<meta id="zembil-description" name="description" content="%zembil.description%" />
+		<link
+			id="zembil-manifest"
+			rel="manifest"
+			href="%sveltekit.assets%/manifest-%zembil.lang%.webmanifest"
+		/>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

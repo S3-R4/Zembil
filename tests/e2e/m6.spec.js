@@ -69,9 +69,9 @@ test('claim a trip with a note, then release it', async ({ page }) => {
 
 	await expect(page.getByText('Nobody is going yet.')).toBeVisible();
 
-	await page.getByRole('button', { name: "I’m going to this shop" }).click();
+	await page.getByRole('button', { name: 'I’m going to this shop' }).click();
 	await page.getByPlaceholder('What are you picking up?').fill('only the milk');
-	await page.getByRole('button', { name: "I’m going", exact: true }).click();
+	await page.getByRole('button', { name: 'I’m going', exact: true }).click();
 
 	await expect(page.getByText('You are shopping here.')).toBeVisible();
 	await expect(page.getByText('“only the milk”')).toBeVisible();
@@ -82,14 +82,15 @@ test('claim a trip with a note, then release it', async ({ page }) => {
 	await expect(page.getByText('You are shopping here.')).toBeVisible();
 	await page.getByRole('link', { name: /Claim Shop/ }).click();
 
-	await page.getByRole('button', { name: 'Change my note' }).click();
-	await page.getByRole('button', { name: "I’m not going" }).click();
+	// M10: release is visible directly on the claim strip. Leaving without
+	// finishing no longer requires discovering it inside the note sheet.
+	await page.getByRole('button', { name: 'I’m not going' }).click();
 	await expect(page.getByText('Nobody is going yet.')).toBeVisible();
 });
 
 test('the note field counts down and stops at 140', async ({ page }) => {
 	await addStore(page, 'Note Shop');
-	await page.getByRole('button', { name: "I’m going to this shop" }).click();
+	await page.getByRole('button', { name: 'I’m going to this shop' }).click();
 
 	const field = page.getByPlaceholder('What are you picking up?');
 	await expect(page.getByText('140 characters left')).toBeVisible();
@@ -137,9 +138,9 @@ test('a second member is offered "take over" rather than silently displacing any
 	await expect(theirs).toHaveURL(/\/$/);
 
 	await theirs.goto(path);
-	await theirs.getByRole('button', { name: "I’m going to this shop" }).click();
+	await theirs.getByRole('button', { name: 'I’m going to this shop' }).click();
 	await theirs.getByPlaceholder('What are you picking up?').fill('bread');
-	await theirs.getByRole('button', { name: "I’m going", exact: true }).click();
+	await theirs.getByRole('button', { name: 'I’m going', exact: true }).click();
 	await expect(theirs.getByText('You are shopping here.')).toBeVisible();
 
 	// Now the admin sees who is going, and gets the take-over path.
@@ -147,7 +148,7 @@ test('a second member is offered "take over" rather than silently displacing any
 	await expect(page.getByText('İkinci is shopping here.')).toBeVisible();
 
 	await page.getByRole('button', { name: 'Take over', exact: true }).click();
-	await page.getByRole('button', { name: "I’m going", exact: true }).click();
+	await page.getByRole('button', { name: 'I’m going', exact: true }).click();
 
 	// R-19: the first attempt deliberately fails so the member is TOLD who is
 	// already going, and the button becomes an explicit take-over.

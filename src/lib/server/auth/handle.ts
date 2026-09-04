@@ -16,6 +16,7 @@ import { clearSessionCookie, readSessionCookie, refreshSessionCookie } from './c
 import { resolveSession } from './session.js';
 import { negotiateAcceptLanguage } from './locale.js';
 import { DEFAULT_THEME } from '$lib/types';
+import { PWA_DESCRIPTIONS } from '$lib/pwa';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -197,7 +198,10 @@ export function createHandle(db: Db, config: AuthConfig): Handle {
 
 		const response = await resolve(event, {
 			transformPageChunk: ({ html }) =>
-				html.replace('%zembil.lang%', lang).replace('%zembil.theme%', theme)
+				html
+					.replaceAll('%zembil.lang%', lang)
+					.replace('%zembil.theme%', theme)
+					.replace('%zembil.description%', PWA_DESCRIPTIONS[lang])
 		});
 
 		return applySecurityHeaders(response, authenticated);
